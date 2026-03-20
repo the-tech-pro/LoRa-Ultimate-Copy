@@ -1,180 +1,305 @@
-# eChook LoRa Telemetry Gateway PRD
+# eChook LoRa Telemetry Dashboard PRD
 
 ## TL;DR
-We will tap the eChook UART output using the Bluetooth module header/pads (the same 5-byte packets used for Bluetooth), feed it into the RA-08H RP2040 board, bundle packets into 1 Hz LoRa P2P frames for reliability, then receive/decode them on the Elecrow ESP32 gateway. The gateway will show connection status plus rotating stats on the LCD and host a live dashboard over WiFi AP by default, with optional WiFi STA and Ethernet support.
+This project replaces the existing eChook Bluetooth link with a LoRa link while keeping the eChook telemetry packet format unchanged. The default system is:
 
-## Goals
-- Acquire live eChook telemetry without using Bluetooth or plugging in the Bluetooth module.
-- Use existing hardware: RA-08H node board + Elecrow ESP32 gateway.
-- Show core telemetry and link status on the gateway LCD.
-- Provide a simple live dashboard accessible via WiFi AP, WiFi STA, or Ethernet.
-- Prioritize reliability at ~1 Hz updates.
+```text
+eChook -> UART -> Sender Pi -> UART -> LoRa -> air -> LoRa -> Receiver Pi -> Flask dashboard
+```
 
-## Non-goals
-- Full LoRaWAN network support (use LoRa P2P).
-- Multi-car support (single car for now).
-- Cloud telemetry (local only).
+The simpler fallback system is:
+
+```text
+eChook -> UART -> LoRa -> air -> LoRa -> Receiver Pi -> Flask dashboard
+```
+
+The receiver Raspberry Pi is responsible for parsing packets, decoding values, adding timestamps, and serving a live local dashboard.
+
+## Product Goal
+Build a lightweight, reliable local telemetry system that:
+- reuses the eChook's existing UART/Bluetooth data output,
+- sends it over LoRa instead of Bluetooth,
+- displays live vehicle telemetry on a receiver-side dashboard,
+- stays simple for the first working version and leaves room for later expansion.
+
+## Core Principle
+The main design principle is simple:
+
+> Replace Bluetooth with LoRa and keep the rest of the telemetry flow as close to the existing eChook output as possible.
+
+## In Scope
+- Reading raw eChook UART telemetry packets.
+- Sending telemetry over a LoRa serial link.
+- Receiving telemetry on a Raspberry Pi.
+- Decoding raw packets into usable values.
+- Adding timestamps on the receiver side.
+- Displaying live telemetry in a Flask dashboard.
+- Showing at least speed, voltage, current, and temperatures in the dashboard.
+
+## Out of Scope
+- Changing the eChook packet format.
+- Sending commands back to the car.
+- Cloud sync or internet-facing telemetry.
+- Multi-car support.
+- Historical analytics or complex long-term storage in the first version.
+- A native mobile app.
 
 ## System Overview
-Data path:
-1) eChook TX (UART) -> RA-08H UART RX (5V level).
-2) RA-08H RP2040 parses 5-byte eChook packets.
-3) RP2040 bundles packets into a LoRa P2P frame at 1 Hz and transmits.
-4) ESP32 gateway receives LoRa, decodes packets, updates LCD and dashboard.
-
-## Hardware
-- eChook board (Arduino-based). We will not plug in the HC-05 module; we only use its header/pads as a UART tap point.
-- Elecrow RA-08H LoRaWAN Node Board (RP2040 + RA-08H LoRa module).
-- Elecrow LoRaWAN Gateway Module (ESP32 + SX1276/RA-01H + LCD).
-
-### Power/voltage notes (from datasheets/docs)
-- eChook HC-05 module uses 5V power and is connected to Arduino TX/RX (we are not installing the module; we only use its header/pads).
-- RA-08H node board powered by USB-C 5V; Crowtail UART is 5V-level.
-- Gateway powered by USB-C 5V, internal 3.3V rail.
-
-## Interfaces and Wiring
-- eChook TX -> RA-08H UART RX (Crowtail UART RX) via the Bluetooth module header/pads.
-- eChook GND -> RA-08H GND.
-- RA-08H TX -> eChook RX is optional (only if needed for future commands).
-- Bluetooth module is not installed; we use its header/pads as the UART breakout for TX/GND (and RX if needed).
-
-## Telemetry Packet Format
-### eChook 5-byte frame (UART)
-Each measurement is:
+### Default architecture: Sender Pi in the car
+```text
+eChook -> UART -> Sender Raspberry Pi -> UART -> LoRa radio -> air ->
+LoRa radio -> Receiver Raspberry Pi -> Flask dashboard
 ```
-{ id data1 data2 }
+
+This is the recommended architecture because the sender Pi can:
+- validate incoming packets,
+- buffer or batch packets if needed,
+- add GPS or other sensors later,
+- improve reliability without changing the eChook side.
+
+### Simpler architecture: direct eChook to LoRa
+```text
+eChook -> UART -> LoRa radio -> air -> LoRa radio -> Receiver Raspberry Pi -> Flask dashboard
 ```
-- Start byte: '{' (123)
-- id: single ASCII char
-- data1, data2: encoded value
-- End byte: '}' (125)
 
-### Value decoding rules
-From eChook docs/firmware:
-- If value <= 127:
-  - data1 = integer part
-  - data2 = 2 decimal places
-  - 0xFF is used instead of 0 to avoid null bytes
-- If value > 127:
-  - data1 = hundreds part + 128 (MSB set to mark integer)
-  - data2 = tens/units
-  - 0xFF used in place of 0 if needed
+This is acceptable as a simpler fallback, but it is not the default delivery target because it removes the flexibility and observability provided by the sender Pi.
 
-### Probably Known IDs (from eChook firmware)
-- s: speed (m/s)
-- m: motor RPM
-- i: current (A)
-- v: total battery voltage (V)
-- w: lower battery voltage (V)
-- t: throttle input (%)
-- d: throttle output (%)
-- T: throttle voltage
-- a: temp1 (C)
-- b: temp2 (C)
-- c: internal temp (C)
-- r: gear ratio
-- B: brake
-- L: launch button
-- C: cycle view button
-- V: ADC reference voltage
+## Key Design Decisions
+- Reuse the eChook's existing UART/Bluetooth packet format instead of creating a new telemetry protocol.
+- Treat the LoRa link as the wireless replacement for Bluetooth.
+- Use the sender Pi architecture as the default because it gives better control, debugging, and future extensibility.
+- Add timestamps on the receiver because the source packets do not include time data.
+- Keep the first release simple, then add batching, logging, GPS, or extra sensors later if needed.
 
-## LoRa P2P Frame Format (proposed)
-Bundle multiple 5-byte packets into one LoRa payload at 1 Hz.
+## Primary Hardware
+- eChook controller with UART telemetry output using the same format as its Bluetooth output.
+- Sender side:
+  - Default: Raspberry Pi plus LoRa module connected over UART.
+  - Optional simplified build: LoRa module directly connected to the eChook UART.
+- Receiver side:
+  - Raspberry Pi running the receiver and dashboard.
+  - LoRa module connected to the Pi over UART.
 
-Example:
+## Software Stack
+- Raspberry Pi OS Lite
+- Python 3
+- `pyserial` for UART communication
+- `flask` for the local dashboard
+
+## Telemetry Source: eChook UART / Bluetooth Output
+The eChook already emits compact telemetry over UART using the same protocol used by its Bluetooth module.
+
+Each telemetry packet is exactly 5 bytes:
+
+```text
+[{][id][data1][data2][}]
 ```
-0xEC | seq | count | [packet1..packetN]
+
+Where:
+- `{` is the start byte
+- `id` is a single-character sensor identifier
+- `data1` and `data2` carry the value
+- `}` is the end byte
+
+The bytes are raw serial bytes, not a human-readable text payload.
+
+## Packet Decoding Rules
+The receiver must decode values exactly according to the eChook encoding scheme.
+
+### Framing
+- A valid packet starts with byte `123` (`{`).
+- A valid packet ends with byte `125` (`}`).
+- Packet length is always 5 bytes.
+
+### Zero value
+- A sensor value of zero is encoded as:
+  - `data1 = 0xFF`
+  - `data2 = 0xFF`
+
+### Values up to 127
+If the original value is less than or equal to `127`, the value is encoded with up to two decimal places:
+
+```text
+value = integer_part + decimal_part / 100
 ```
-- 0xEC: frame marker
-- seq: rolling sequence number (0-255)
-- count: number of 5-byte eChook packets
-- packetN: raw 5-byte eChook frames
 
-Optional: add a simple checksum byte at the end if needed (LoRa CRC may be enough).
+Rules:
+- `data1` carries the integer part
+- `data2` carries the decimal part
+- `0xFF` is used in place of `0` for either component
 
-## LCD Requirements (Gateway)
-- Always show a simple connection status: YES/NO.
-  - YES if packets seen in last N seconds (e.g., 2s).
-- Rotate views every few seconds:
-  - View A (core): speed, current, total voltage, temp1, temp2.
-  - View B (link): RSSI, SNR, packet rate, last packet age.
-  - View C (extra): RPM, throttle %, lower voltage (optional).
+Examples:
+- `12.34` -> `data1 = 12`, `data2 = 34`
+- `12.00` -> `data1 = 12`, `data2 = 0xFF`
+- `0.56` -> `data1 = 0xFF`, `data2 = 56`
+- `0.00` -> `data1 = 0xFF`, `data2 = 0xFF`
 
-## Dashboard Requirements (Gateway)
-- Serve a simple live dashboard with:
-  - Core telemetry values.
-  - Link stats (RSSI, SNR, packet rate, last packet age).
-  - Connection status.
-- Update rate: 1 Hz.
+### Values above 127
+If the original value is greater than `127`, it is encoded as an integer:
 
-### Network modes (LoRa Gateway)
-- WiFi AP (default): gateway hosts SSID + dashboard.
-- WiFi STA (optional): gateway joins pit WiFi and serves dashboard.
-- Ethernet (optional): serve dashboard over wired LAN.
-- USB-C serial: debug stream only.
+```text
+value = (hundreds_part * 100) + tens_units_part
+```
 
-## Firmware Components
-### RA-08H (RP2040)
-- UART reader @ 115200 baud.
-- eChook frame parser and value decoder.
-- Buffer values; build LoRa P2P payload at 1 Hz.
-- LoRa transmit with fixed frequency/SF/BW.
+Rules:
+- `data1` stores the hundreds/thousands portion with `128` added to mark integer mode
+- `data2` stores the tens/units portion
+- `0xFF` is used in place of `0` where needed
 
-### Gateway (ESP32)
-- LoRa receive + RSSI/SNR capture.
-- Parse LoRa payload into eChook frames.
-- Decode values; maintain latest state.
-- LCD UI with rotating views.
-- HTTP server + live updates (WebSocket or SSE).
-- Network configuration for AP/STA/Ethernet.
+Decode rule:
 
-## Reliability and Constraints
-- Use 1 Hz updates for reliability.
-- LoRa P2P avoids LoRaWAN overhead and fits single-car use.
-- EU868 duty-cycle limits apply; 1 Hz with bundled packets is safe.
+```text
+value = ((data1 - 128) * 100) + normalized(data2)
+```
 
-## Greenpower Compliance (F24 2025/2026)
-- T14.1 prohibits transmitting any electronic data to the car/driver; only verbal/visual communication to the driver is allowed.
-- T14.2 requires telemetry/communications to operate at national legal frequencies and power levels.
-- Design decision: car node is TX-only (no downlink, no acknowledgements, no commands to car).
-- Gateway must not transmit to the car during events.
-- Source PDFs:
-  - 2025 F24 regs: https://www.greenpower.co.uk/sites/default/files/uploads/2025/Regulations/F24%20Technical%20and%20Sporting%20Regulations%202025%20v1.0.pdf
-  - 2026 F24 regs: https://www.greenpower.co.uk/sites/default/files/uploads/2026/Technical/F24%20Technical%20and%20Sporting%20Regulations%202026%20v1.0.pdf
+Where `normalized(x)` means treat `0xFF` as `0`.
 
-## Implementation Strategy (phased)
-1) Validate eChook UART output:
-   - Confirm 115200 baud and 5-byte frames on a serial reader.
-2) RA-08H UART parsing:
-   - Parse and decode eChook frames, log to USB serial.
-3) LoRa P2P link:
-   - Transmit bundled payload from RA-08H, receive on gateway.
-4) Gateway decode + LCD:
-   - Decode frames, show connection status + rotating stats.
-5) Dashboard:
-   - Serve live data over WiFi AP, add STA/Ethernet options.
+### Receiver decoding logic
+The receiver-side decoder must follow this order:
+1. Verify framing bytes.
+2. If `data1 == 0xFF` and `data2 == 0xFF`, decode the value as `0`.
+3. Else if `data1 >= 128` and `data1 != 0xFF`, decode as an integer value above `127`.
+4. Else decode as a value up to `127` using `integer + decimals / 100`.
 
-## Current Status (as of latest changes)
-- Phase 1 is validated: eChook UART output is confirmed on the HC-05 header pads.
-- Note: the header silk labels are from the HC-05 module's perspective. The pad labeled `RXD` carries eChook TX data (connect your USB-UART RX there).
-- A small local viewer tool exists:
-  - `uart_read.ps1` provides a simple GUI to view decoded eChook values (1 row per ID).
-  - `uart_read_gui.cmd` is a clickable launcher (defaults to COM5 @ 115200).
-  - The GUI shows connected/disconnected state and lets you pick a COM port.
+## Confirmed Telemetry Identifier Table
+The following raw packet identifiers are confirmed from the eChook Arduino Nano code in `globals.h`.
 
-## Developer Onboarding (new coders)
-- Start here: read this PRD in full, then review `eChookCode/eChook_Functions.ino` to see the 5-byte frame format and `sendData(...)` usage.
-- Confirm your board/serial wiring using the Phase 1 notes above before moving to LoRa work.
-- Keep changes aligned to the Goals/Non-goals and the greenpower compliance notes.
+| ID | Constant | Meaning | Units / Notes |
+| --- | --- | --- | --- |
+| `s` | `SPEED_ID` | Speed | m/s |
+| `m` | `MOTOR_ID` | Motor speed | RPM |
+| `i` | `CURRENT_ID` | Current | A |
+| `v` | `VOLTAGE_ID` | Total battery voltage | V |
+| `w` | `VOLTAGE_LOWER_ID` | Lower battery voltage | V |
+| `t` | `THROTTLE_INPUT_ID` | Throttle input | % |
+| `d` | `THROTTLE_OUTPUT_ID` | Throttle output | % |
+| `T` | `THROTTLE_VOLTAGE_ID` | Throttle input voltage | V |
+| `a` | `TEMP1_ID` | Temperature 1 | C |
+| `b` | `TEMP2_ID` | Temperature 2 | C |
+| `c` | `TEMP3_ID` | Internal temperature | C |
+| `L` | `LAUNCH_MODE_ID` | Launch mode / start button | button state |
+| `C` | `CYCLE_VIEW_ID` | Cycle view / screen button | button state |
+| `r` | `GEAR_RATIO_ID` | Calculated gear ratio | ratio |
+| `B` | `BRAKE_PRESSED_ID` | Brake pressed | on/off |
+| `V` | `REF_VOLTAGE_ID` | ADC reference voltage | V |
 
-## Testing and Validation
-- Bench test UART decoding using known eChook output.
-- Range test at 1 Hz with RSSI/SNR logging.
-- LCD display verification for all fields.
-- Dashboard responsiveness check on phone and laptop.
+### Derived values
+Not every dashboard field necessarily comes from a dedicated raw eChook packet identifier.
+
+Examples:
+- packet age and receive time are added on the receiver Pi,
+- connection status is derived from recent packet activity,
+- any future computed metrics such as charts, summaries, or derived battery values should be treated as receiver-side calculations unless a raw eChook identifier exists for them.
+
+## Sender Requirements
+### Default sender mode: Raspberry Pi bridge
+The sender Pi must:
+- read raw 5-byte packets from the eChook UART,
+- validate framing before forwarding,
+- forward telemetry to the LoRa module over UART,
+- avoid changing the meaning of the original eChook packets,
+- keep the implementation simple in the first version.
+
+The sender Pi may also:
+- batch multiple eChook packets into a LoRa transmission,
+- tag packets with sender-side metadata in a future version,
+- merge in GPS or other sensors later.
+
+### Simplified sender mode: direct eChook to LoRa
+If the direct wiring approach is used:
+- the LoRa radio acts as a transparent serial bridge,
+- the receiver-side decode path stays the same,
+- sender-side preprocessing is not available.
+
+This option is supported conceptually, but the initial implementation target remains the sender Pi architecture.
+
+## Receiver Requirements
+The receiver Raspberry Pi must:
+- read telemetry bytes from the LoRa UART,
+- reconstruct 5-byte eChook packets,
+- validate framing,
+- decode values from `id`, `data1`, and `data2`,
+- add a receive timestamp because eChook packets do not contain one,
+- store the latest value per telemetry identifier,
+- make the latest decoded state available to the Flask dashboard.
+
+The receiver timestamp is the authoritative timestamp for the first version of the system.
+
+## Dashboard Requirements
+The dashboard runs on the receiver Pi and must be implemented in Flask.
+
+### Dashboard must show
+- connection status
+- latest update time / packet age
+- speed
+- voltage
+- current
+- temperatures
+
+### Dashboard behavior
+- Refresh automatically roughly once per second.
+- Prefer a simple local-web implementation over a complex frontend stack.
+- Be usable on a laptop or phone connected to the receiver Pi's local network.
+
+### Initial data model
+The first version only needs to maintain the latest known value for each telemetry field plus its receive timestamp.
+
+Persistent history is not required for the first version.
+
+## Networking and Deployment
+- The dashboard is hosted locally on the receiver Raspberry Pi.
+- The system is intended to work on a local network without cloud services.
+- Receiver services should be suitable for running headless on Raspberry Pi OS Lite.
+
+## Functional Requirements
+1. The system must accept the raw 5-byte eChook UART packet format without redesigning the payload structure.
+2. The default architecture must support a sender Raspberry Pi between the eChook and LoRa radio.
+3. The system must also remain compatible with a future direct eChook-to-LoRa build.
+4. The receiver must add timestamps because the source packets do not include time data.
+5. The receiver must decode values consistently with the published eChook Bluetooth/UART encoding rules.
+6. The dashboard must present live telemetry with approximately 1 second refresh behavior.
+7. The first release must prioritize simplicity and reliability over advanced features.
+
+## Non-Functional Requirements
+- Keep the first implementation lightweight and easy to debug.
+- Preserve the original eChook packet semantics end to end.
+- Minimize custom protocol complexity over the LoRa link in the first version.
+- Make it easy to extend later with batching, GPS, extra sensors, or data logging.
+
+## Assumptions
+- The eChook UART output used here is the same data stream and packet format as the Bluetooth module output.
+- The exact UART settings used in the current bench setup should be revalidated during implementation.
+- A small amount of receiver-side latency is acceptable as long as the dashboard feels live.
+
+## Delivery Phases
+### Phase 1: Receiver-side proof of life
+- Read LoRa UART on the receiver Pi.
+- Parse raw 5-byte packets.
+- Decode values correctly.
+- Show them in a minimal Flask dashboard.
+
+### Phase 2: Sender Pi bridge
+- Read eChook UART on a sender Pi.
+- Forward packets over LoRa.
+- Confirm end-to-end telemetry flow.
+
+### Phase 3: Hardening
+- Improve packet validation and error handling.
+- Add optional batching if it improves radio performance.
+- Add service startup and deployment polish.
+
+### Phase 4: Extensions
+- Add GPS or additional sender-side sensors.
+- Add optional logging or historical charts.
+- Add more advanced dashboard views if needed.
+
+## Success Criteria
+- Live eChook telemetry reaches the receiver Pi over LoRa.
+- The receiver decodes incoming packets into correct engineering values.
+- The dashboard updates automatically and shows useful live telemetry.
+- The implementation works with the existing eChook telemetry format rather than inventing a new one.
 
 ## Open Questions
-- Confirm eChook header pinout for TX/GND access.
-- Confirm exact LoRa frequency/SF/BW for the race environment.
-- Decide if checksum is needed in LoRa payload.
-- Confirm LCD UI library choice for the gateway firmware.
+- Confirm the final UART settings used between eChook and the sender-side reader.
+- Confirm the exact LoRa hardware pair and any constraints they impose on transparent UART forwarding.
+- Decide whether batching is needed for the initial deployment or can wait until after the first end-to-end demo.
