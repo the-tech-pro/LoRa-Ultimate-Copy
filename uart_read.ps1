@@ -61,6 +61,34 @@ function Get-PrintableByte {
   return "."
 }
 
+function Get-HexByte {
+  param([int]$Byte)
+
+  return ("{0:X2}" -f $Byte)
+}
+
+function Format-RawPacketLine {
+  param(
+    [DateTime]$Timestamp,
+    [string]$IdKey,
+    [byte]$Data1,
+    [byte]$Data2,
+    [object]$Decoded
+  )
+
+  $name = $IdKey
+  if ($idNames.ContainsKey($IdKey)) {
+    $name = $idNames[$IdKey]
+  }
+
+  $valueText = if ($Decoded.Mode -eq 'float') { "{0:0.00}" -f $Decoded.Value } else { "{0:0}" -f $Decoded.Value }
+  $idByte = [int][char]$IdKey
+  $packetText = ("[{0} {1} {2} {3} {4}]" -f (Get-HexByte -Byte 123), (Get-HexByte -Byte $idByte), (Get-HexByte -Byte $Data1), (Get-HexByte -Byte $Data2), (Get-HexByte -Byte 125))
+  $frameText = ("{{{0} {1} {2}}}" -f $IdKey, (Get-HexByte -Byte $Data1), (Get-HexByte -Byte $Data2))
+
+  return ("{0:HH:mm:ss.fff}  {1,-20}  {2,-14}  {3} = {4}" -f $Timestamp, $packetText, $frameText, $name, $valueText)
+}
+
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "eChook UART Viewer"
 $form.StartPosition = "CenterScreen"
@@ -99,7 +127,7 @@ $connectButton.Text = "Connect"
 $connectButton.AutoSize = $true
 
 $rawButton = New-Object System.Windows.Forms.Button
-$rawButton.Text = "Show Raw Data"
+$rawButton.Text = "Open UART Console"
 $rawButton.AutoSize = $true
 
 $headerPanel = New-Object System.Windows.Forms.TableLayoutPanel
@@ -193,7 +221,7 @@ $clearRawButton.AutoSize = $true
 
 $rawHeaderLabel = New-Object System.Windows.Forms.Label
 $rawHeaderLabel.AutoSize = $true
-$rawHeaderLabel.Text = "Timestamp    Hex   ASCII"
+$rawHeaderLabel.Text = "Timestamp    Exact packet bytes    Frame           Decoded value"
 
 $rawHeaderPanel = New-Object System.Windows.Forms.FlowLayoutPanel
 $rawHeaderPanel.AutoSize = $true
@@ -222,7 +250,10 @@ $script:connectButton = $connectButton
 $script:portCombo = $portCombo
 $script:rawForm = $rawForm
 $script:rawTextBox = $rawTextBox
+$script:rawLogLines = New-Object 'System.Collections.Generic.List[string]'
+$script:rawLogPath = Join-Path $env:TEMP ("echook_uart_raw_{0}.log" -f $PID)
 $script:rawLoggingEnabled = $true
+$script:consoleRawEnabled = $true
 $script:sp = $null
 $script:isOpen = $false
 $script:currentPort = $null
@@ -230,7 +261,7 @@ $script:lastFrameUtc = $null
 $script:lastKnownUtc = $null
 $script:lastNonZeroUtc = $null
 $script:recentIds = @{}
-$script:maxRawLogChars = 60000
+$script:maxRawLogLines = 500
 $dataWindowSeconds = 2
 $minDistinctIds = 3
 
@@ -263,20 +294,116 @@ function Add-RawLogLine {
     return
   }
 
-  if (-not $script:rawTextBox -or $script:rawTextBox.IsDisposed) {
+  if (-not $script:rawLogLines) {
     return
   }
 
   try {
-    $script:rawTextBox.AppendText($Text + [Environment]::NewLine)
-    if ($script:rawTextBox.TextLength -gt $script:maxRawLogChars) {
-      $script:rawTextBox.Text = $script:rawTextBox.Text.Substring($script:rawTextBox.TextLength - 40000)
-      $script:rawTextBox.SelectionStart = $script:rawTextBox.TextLength
+    $script:rawLogLines.Add($Text)
+    while ($script:rawLogLines.Count -gt $script:maxRawLogLines) {
+      $script:rawLogLines.RemoveAt(0)
     }
+  } catch {
+    return
+  }
+
+  Write-RawLogFile $Text
+  Write-ConsoleRawLine $Text
+  Sync-RawLogView
+}
+
+function Write-RawLogFile {
+  param([string]$Text)
+
+  if (-not $script:rawLogPath) {
+    return
+  }
+
+  try {
+    Add-Content -LiteralPath $script:rawLogPath -Value $Text -Encoding ASCII
+  } catch {
+  }
+}
+
+function Write-ConsoleRawLine {
+  param([string]$Text)
+
+  if (-not $script:consoleRawEnabled) {
+    return
+  }
+
+  try {
+    Write-Host $Text
+  } catch {
+    $script:consoleRawEnabled = $false
+  }
+}
+
+function Sync-RawLogView {
+  if (-not $script:rawTextBox -or $script:rawTextBox.IsDisposed) {
+    return
+  }
+
+  if (-not $script:rawLogLines) {
+    return
+  }
+
+  try {
+    $script:rawTextBox.Lines = $script:rawLogLines.ToArray()
+    $script:rawTextBox.SelectionStart = $script:rawTextBox.TextLength
     $script:rawTextBox.ScrollToCaret()
   } catch {
-    # Raw logging is optional; never let UI logging break serial capture.
-    $script:rawLoggingEnabled = $false
+  }
+}
+
+function Add-RawPacketLog {
+  param(
+    [DateTime]$Timestamp,
+    [string]$IdKey,
+    [byte]$Data1,
+    [byte]$Data2,
+    [object]$Decoded
+  )
+
+  if (-not $script:rawLoggingEnabled) {
+    return
+  }
+
+  try {
+    $line = Format-RawPacketLine -Timestamp $Timestamp -IdKey $IdKey -Data1 $Data1 -Data2 $Data2 -Decoded $Decoded
+    Add-RawLogLine $line
+  } catch {
+    $fallbackLine = ("{0:HH:mm:ss.fff}  [{1:X2} {2:X2} {3:X2} {4:X2} {5:X2}]  packet log fallback" -f $Timestamp, 123, ([int][char]$IdKey), ([int]$Data1), ([int]$Data2), 125)
+    Add-RawLogLine $fallbackLine
+  }
+}
+
+function Reset-RawLogFile {
+  if (-not $script:rawLogPath) {
+    return
+  }
+
+  try {
+    Set-Content -LiteralPath $script:rawLogPath -Value @() -Encoding ASCII
+  } catch {
+  }
+}
+
+function Open-RawConsole {
+  if (-not $script:rawLogPath) {
+    return
+  }
+
+  try {
+    if (-not (Test-Path -LiteralPath $script:rawLogPath)) {
+      New-Item -ItemType File -Path $script:rawLogPath -Force | Out-Null
+    }
+
+    $escapedPath = $script:rawLogPath.Replace("'", "''")
+    $command = "`$host.UI.RawUI.WindowTitle = 'eChook UART Raw'; Get-Content -LiteralPath '$escapedPath' -Wait"
+    Start-Process powershell -ArgumentList @('-NoExit', '-NoProfile', '-Command', $command) | Out-Null
+  } catch {
+    Set-Status ("Disconnected: failed to open UART console") "disconnected"
   }
 }
 
@@ -310,6 +437,8 @@ function Open-SerialPort {
     $script:lastKnownUtc = $null
     $script:lastNonZeroUtc = $null
     $script:recentIds.Clear()
+    $script:rawLogLines.Clear()
+    Reset-RawLogFile
     $script:rawLoggingEnabled = $true
     Set-ButtonState $true
     Set-Status ("Port open: waiting for data on {0} @ {1}" -f $SelectedPort, $Baud) "warning"
@@ -318,7 +447,7 @@ function Open-SerialPort {
     Set-ButtonState $false
     return
   }
-  Add-RawLogLine ("=== Logging raw UART bytes on {0} @ {1} ===" -f $SelectedPort, $Baud)
+  Add-RawLogLine ("=== Logging raw UART packets on {0} @ {1} ===" -f $SelectedPort, $Baud)
 }
 
 function Update-Status {
@@ -379,17 +508,14 @@ $connectButton.Add_Click({
 })
 
 $rawButton.Add_Click({
-  if (-not $script:rawForm.Visible) {
-    $script:rawForm.Show()
-  }
-  $script:rawForm.BringToFront()
-  $script:rawForm.Focus()
+  Open-RawConsole
 })
 
 $clearRawButton.Add_Click({
-  if ($script:rawTextBox -and -not $script:rawTextBox.IsDisposed) {
-    $script:rawTextBox.Clear()
+  if ($script:rawLogLines) {
+    $script:rawLogLines.Clear()
   }
+  Sync-RawLogView
 })
 
 $rawForm.Add_FormClosing({
@@ -409,8 +535,6 @@ $timer.Add_Tick({
     while ($script:sp.BytesToRead -gt 0) {
       $b = $script:sp.ReadByte()
       if ($b -lt 0) { break }
-      $byteTime = [DateTime]::Now
-      Add-RawLogLine ("{0:HH:mm:ss.fff}  0x{1:X2}   {2}" -f $byteTime, $b, (Get-PrintableByte -Byte $b))
       $script:buffer.Add([byte]$b)
       if ($script:buffer.Count -gt 5) { $script:buffer.RemoveAt(0) }
 
@@ -419,8 +543,10 @@ $timer.Add_Tick({
         $decoded = Decode-EchookValue -Data1 $script:buffer[2] -Data2 $script:buffer[3]
         $idKey = [string]$id
         $valueText = if ($decoded.Mode -eq 'float') { "{0:0.00}" -f $decoded.Value } else { "{0:0}" -f $decoded.Value }
+        $packetTime = [DateTime]::Now
         $now = [DateTime]::UtcNow
         $script:lastFrameUtc = $now
+        Add-RawPacketLog -Timestamp $packetTime -IdKey $idKey -Data1 $script:buffer[2] -Data2 $script:buffer[3] -Decoded $decoded
 
         if ($script:valueLabels.ContainsKey($idKey)) {
           $script:valueLabels[$idKey].Text = $valueText
