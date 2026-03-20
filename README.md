@@ -1,6 +1,6 @@
 # eChook LoRa Telemetry Dashboard
 
-iThis project replaces the eChook Bluetooth link with a LoRa link while keeping the original 5-byte eChook telemetry packet format unchanged.
+This project replaces the eChook Bluetooth link with a LoRa link while keeping the original 5-byte eChook telemetry packet format unchanged.
 
 The default architecture from `PRD.md` is:
 
