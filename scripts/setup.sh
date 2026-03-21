@@ -99,6 +99,19 @@ prompt_choice() {
   done
 }
 
+is_pi_uart_device() {
+  local device_path="$1"
+
+  case "$device_path" in
+    /dev/ttyS0|/dev/ttyAMA0|/dev/ttyAMA1|/dev/serial0|/dev/serial1)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 get_current_hostname() {
   local hostname_value
 
@@ -258,6 +271,51 @@ remove_path_from_list() {
   done
 }
 
+prefer_candidate_order() {
+  local -a preferred_paths=()
+  local -a candidates=()
+  local in_preferred="n"
+  local preferred_path
+  local candidate
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --)
+        shift
+        break
+        ;;
+      *)
+        preferred_paths+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  candidates=("$@")
+
+  for preferred_path in "${preferred_paths[@]}"; do
+    for candidate in "${candidates[@]}"; do
+      if [[ "$candidate" == "$preferred_path" ]]; then
+        printf '%s\n' "$candidate"
+        break
+      fi
+    done
+  done
+
+  for candidate in "${candidates[@]}"; do
+    in_preferred="n"
+    for preferred_path in "${preferred_paths[@]}"; do
+      if [[ "$candidate" == "$preferred_path" ]]; then
+        in_preferred="y"
+        break
+      fi
+    done
+
+    [[ "$in_preferred" == "y" ]] && continue
+    printf '%s\n' "$candidate"
+  done
+}
+
 choose_serial_device() {
   local prompt="$1"
   local default_value="$2"
@@ -298,30 +356,35 @@ choose_serial_device() {
 
 choose_receiver_lora_serial_port() {
   local -a candidates=()
+  local -a ordered_candidates=()
 
   mapfile -t candidates < <(get_pi_uart_candidates)
+  mapfile -t ordered_candidates < <(prefer_candidate_order "/dev/ttyS0" "/dev/ttyAMA0" "/dev/ttyAMA1" -- "${candidates[@]}")
   choose_serial_device \
     "Receiver LoRa serial port" \
     "/dev/ttyS0" \
     "Raspberry Pi UART serial devices" \
-    "${candidates[@]}"
+    "${ordered_candidates[@]}"
 }
 
 choose_sender_source_serial_port() {
   local -a candidates=()
+  local -a ordered_candidates=()
 
   mapfile -t candidates < <(get_usb_serial_candidates)
+  mapfile -t ordered_candidates < <(prefer_candidate_order "/dev/ttyUSB0" "/dev/ttyACM0" -- "${candidates[@]}")
   choose_serial_device \
     "eChook source serial port" \
     "/dev/ttyUSB0" \
     "USB serial devices" \
-    "${candidates[@]}"
+    "${ordered_candidates[@]}"
 }
 
 choose_sender_lora_serial_port() {
   local source_port="$1"
   local -a candidates=()
   local -a filtered_candidates=()
+  local -a ordered_candidates=()
 
   mapfile -t candidates < <(get_pi_uart_candidates)
   if ((${#candidates[@]} > 0)); then
@@ -332,11 +395,12 @@ choose_sender_lora_serial_port() {
     filtered_candidates=("${candidates[@]}")
   fi
 
+  mapfile -t ordered_candidates < <(prefer_candidate_order "/dev/ttyS0" "/dev/ttyAMA0" "/dev/ttyAMA1" -- "${filtered_candidates[@]}")
   choose_serial_device \
     "LoRa serial port" \
     "/dev/ttyS0" \
     "Raspberry Pi UART serial devices" \
-    "${filtered_candidates[@]}"
+    "${ordered_candidates[@]}"
 }
 
 install_python_environment() {
@@ -459,6 +523,10 @@ configure_receiver() {
   receiver_hotspot_ssid="egr-echook"
   receiver_hotspot_passphrase="Florence!"
 
+  if is_pi_uart_device "$receiver_serial_port"; then
+    reboot_recommended="y"
+  fi
+
   configure_receiver_networking
 
   install_python_environment
@@ -509,6 +577,10 @@ configure_sender() {
   sender_lora_port="$(choose_sender_lora_serial_port "$sender_source_port")"
   sender_lora_baudrate="$(prompt_with_default "LoRa baudrate" "9600")"
   sender_install_service="y"
+
+  if is_pi_uart_device "$sender_lora_port"; then
+    reboot_recommended="y"
+  fi
 
   install_python_environment
 

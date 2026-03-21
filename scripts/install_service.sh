@@ -31,8 +31,39 @@ device_unit_name() {
   systemd-escape -p --suffix=device "$device_path"
 }
 
+is_pi_uart_device() {
+  local device_path="$1"
+
+  case "$device_path" in
+    /dev/ttyS0|/dev/ttyAMA0|/dev/ttyAMA1|/dev/serial0|/dev/serial1)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+ensure_group_membership() {
+  local user_name="$1"
+  local group_name="$2"
+
+  getent group "$group_name" >/dev/null 2>&1 || return 0
+
+  if id -nG "$user_name" | tr ' ' '\n' | grep -Fxq "$group_name"; then
+    return 0
+  fi
+
+  sudo usermod -a -G "$group_name" "$user_name"
+  added_groups+=("$group_name")
+}
+
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 service_user="${SUDO_USER:-$USER}"
+added_groups=()
+supplementary_groups=()
+pi_uart_selected="n"
+serial_config_changed="n"
 
 [[ -x "$repo_dir/.venv/bin/python" ]] || die "Expected virtualenv at $repo_dir/.venv. Run the README setup first."
 
@@ -149,10 +180,38 @@ esac
 for device_path in "${device_paths[@]}"; do
   after_units+=("$(device_unit_name "$device_path")")
   wants_units+=("$(device_unit_name "$device_path")")
+  if is_pi_uart_device "$device_path"; then
+    pi_uart_selected="y"
+  fi
 done
+
+ensure_group_membership "$service_user" "dialout"
+if getent group dialout >/dev/null 2>&1; then
+  supplementary_groups+=("dialout")
+fi
+
+if [[ "$pi_uart_selected" == "y" ]]; then
+  if command -v raspi-config >/dev/null 2>&1; then
+    sudo raspi-config nonint do_serial_cons 1
+    sudo raspi-config nonint do_serial_hw 0
+    serial_config_changed="y"
+  fi
+
+  sudo systemctl disable --now serial-getty@ttyS0.service 2>/dev/null || true
+  sudo systemctl disable --now serial-getty@ttyAMA0.service 2>/dev/null || true
+  sudo systemctl disable --now serial-getty@ttyAMA1.service 2>/dev/null || true
+  sudo systemctl disable --now serial-getty@serial0.service 2>/dev/null || true
+  sudo systemctl disable --now serial-getty@serial1.service 2>/dev/null || true
+fi
 
 after_line="$(IFS=' '; echo "${after_units[*]}")"
 wants_line="$(IFS=' '; echo "${wants_units[*]}")"
+supplementary_groups_line="$(IFS=' '; echo "${supplementary_groups[*]}")"
+supplementary_groups_directive=""
+
+if [[ -n "$supplementary_groups_line" ]]; then
+  supplementary_groups_directive="SupplementaryGroups=${supplementary_groups_line}"
+fi
 
 service_path="/etc/systemd/system/${service_name}.service"
 
@@ -165,6 +224,7 @@ Wants=${wants_line}
 [Service]
 Type=simple
 User=${service_user}
+${supplementary_groups_directive}
 WorkingDirectory=${repo_dir}
 Environment=PYTHONUNBUFFERED=1
 ExecStartPre=/bin/sleep ${startup_delay_seconds}
@@ -179,6 +239,16 @@ EOF
 sudo systemctl daemon-reload
 
 echo "Installed ${service_name} at ${service_path}"
+if ((${#added_groups[@]} > 0)); then
+  echo "Added ${service_user} to serial access groups: $(IFS=', '; echo "${added_groups[*]}")"
+  echo "If you also run the app manually in a shell, log out and back in before using the serial port directly."
+fi
+if [[ "$pi_uart_selected" == "y" ]]; then
+  echo "Configured Raspberry Pi UART access for on-board serial devices."
+  if [[ "$serial_config_changed" == "y" ]]; then
+    echo "Reboot recommended so serial console changes take full effect."
+  fi
+fi
 echo "Next run:"
 echo "  sudo systemctl enable --now ${service_name}"
 echo "Check status with:"

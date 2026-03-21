@@ -183,8 +183,10 @@ The wizard will:
 - install Python dependencies
 - detect whether the Pi hostname looks like `sender` or `receiver`, ask for confirmation, and fall back to a manual role choice if needed
 - detect likely serial devices from the Pi UART and attached USB serial adapters, then ask for confirmation instead of requiring raw device names up front
+- prefer the current bench defaults during serial detection: receiver/sender LoRa on `/dev/ttyS0`, sender source on `/dev/ttyUSB0`
 - present the remaining default values as `y/n` confirmation prompts, and only ask for manual text entry if you reject the default
 - ask whether to install the correct `systemd` service, with `yes` as the default
+- recommend a reboot when you choose the Pi's on-board UART for LoRa
 - for the receiver, optionally configure `ethernet`, `hotspot`, or leave networking unchanged
 
 Recommended choices:
@@ -460,6 +462,8 @@ The generated services now:
 - wait for the configured serial devices
 - wait for `systemd-udev-settle.service`
 - add a short startup delay at boot
+- ensure the service user has `dialout` access for Raspberry Pi UART and USB serial devices
+- disable the Raspberry Pi serial console and enable serial hardware automatically when you use on-board UART devices such as `/dev/ttyS0`
 
 That helps with Raspberry Pi boot cases where the USB UART or Pi UART is not fully settled yet during early boot.
 
@@ -629,6 +633,7 @@ If `journalctl -f` shows nothing, that does not automatically mean the service i
 
 - wrong serial device
 - wrong baudrate on the eChook side or LoRa side
+- service user missing permission to open `/dev/ttyS0`, `/dev/ttyUSB0`, or `/dev/ttyACM0`
 - Pi serial login shell still enabled
 - HAT jumpers not set correctly for Raspberry Pi UART control
 - SX1268 modules not sharing the same `NETID`, channel, or air speed
@@ -638,6 +643,8 @@ If `journalctl -f` shows nothing, that does not automatically mean the service i
 If the services only work after a manual restart but not immediately after boot, reinstall them with `install_service.sh` and reboot again.
 
 If the sender logs warnings like `LoRa UART write timed out`, the LoRa-side serial link is overloaded or stalled. That points to the sender-to-LoRa path, not the Flask dashboard.
+
+If you see `Permission denied` opening `/dev/ttyS0` or another serial device, rerun `install_service.sh` for that Pi and restart the service. The installer now adds the service user to `dialout` automatically.
 
 ### Check Receiver Networking
 
