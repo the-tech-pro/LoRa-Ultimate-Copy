@@ -89,8 +89,20 @@ fi
 
 cd "$install_dir"
 
-if [[ ! -t 0 && -r /dev/tty ]]; then
-  exec </dev/tty
+echo
+echo "Repository ready at ${install_dir}"
+echo "Launching interactive setup wizard..."
+
+if [[ ! -t 0 ]]; then
+  if [[ -r /dev/tty ]]; then
+    exec bash ./scripts/setup.sh </dev/tty >/dev/tty 2>&1
+  fi
+
+  echo "No interactive terminal is available for the setup wizard."
+  echo "Run it manually with:"
+  echo "  cd ${install_dir}"
+  echo "  bash ./scripts/setup.sh"
+  exit 0
 fi
 
 exec bash ./scripts/setup.sh

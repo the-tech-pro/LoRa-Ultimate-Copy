@@ -101,6 +101,13 @@ That command will:
 - clone or update the repo in `~/LoRa-Ultimate-Copy`
 - launch the interactive setup wizard
 
+If cloning finishes and you do not immediately see the setup wizard prompts, run:
+
+```bash
+cd ~/LoRa-Ultimate-Copy
+bash ./scripts/setup.sh
+```
+
 You can still use the manual steps below if you want tighter control.
 
 <details>
