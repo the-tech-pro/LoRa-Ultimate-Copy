@@ -458,6 +458,84 @@ sudo systemctl disable lora-receiver
 sudo systemctl disable lora-sender
 ```
 
+## Troubleshooting
+
+### Check whether the services are running
+
+Receiver:
+
+```bash
+sudo systemctl status lora-receiver --no-pager
+```
+
+Sender:
+
+```bash
+sudo systemctl status lora-sender --no-pager
+```
+
+You want to see `active (running)`.
+
+### Check whether the services will start at boot
+
+Receiver:
+
+```bash
+sudo systemctl is-enabled lora-receiver
+```
+
+Sender:
+
+```bash
+sudo systemctl is-enabled lora-sender
+```
+
+You want to see `enabled`.
+
+### Check the exact command each service is using
+
+Receiver:
+
+```bash
+sudo systemctl cat lora-receiver
+pgrep -af receiver_app.py
+```
+
+Sender:
+
+```bash
+sudo systemctl cat lora-sender
+pgrep -af sender_bridge_app.py
+```
+
+For the current bench setup, the running commands should include:
+
+- receiver: `--serial-port /dev/ttyS0 --baudrate 9600`
+- sender: `--source-port /dev/ttyUSB0 --lora-port /dev/ttyS0 --source-baudrate 115200 --lora-baudrate 9600`
+
+### Check recent logs
+
+Receiver:
+
+```bash
+journalctl -u lora-receiver -n 50 --no-pager
+```
+
+Sender:
+
+```bash
+journalctl -u lora-sender -n 50 --no-pager
+```
+
+To follow new logs live:
+
+```bash
+journalctl -u lora-receiver -f
+journalctl -u lora-sender -f
+```
+
+If `journalctl -f` shows nothing, that does not automatically mean the service is stopped. It can also mean the service is running but has not written a new log line yet. Use `systemctl status` and `pgrep -af` to confirm whether it is currently running.
+
 ## Updating a Pi
 
 ### Manual update
