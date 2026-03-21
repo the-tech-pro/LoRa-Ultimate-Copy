@@ -311,14 +311,17 @@ Important:
 
 The sender bridge does not decode or transform packets. It validates framing and forwards valid 5-byte packets unchanged, which matches the PRD requirement to preserve the original eChook packet semantics.
 
+To stay within the practical LoRa link capacity, the sender bridge keeps only the latest validated packet per telemetry ID and flushes those latest packets to the LoRa UART on a short interval. That keeps the receiver updated with current telemetry without trying to push every single source-side packet through a slower radio path.
+
 ## UART and LoRa notes
 
 - The current code defaults to the working bench setup: `115200` for the eChook UART and `9600` for the SX1268 HAT UART.
 - The eChook source UART and the SX1268 HAT UART are separate serial links on the sender Pi and do not have to use the same baudrate.
 - The LoRa-side serial commands should use `9600` unless you intentionally reconfigure both SX1268 modules to a different UART baudrate.
+- The sender bridge also coalesces the latest packets by telemetry ID before writing to LoRa, which is a Phase 3 hardening step to avoid overrunning the radio path.
 - Revalidate the real eChook UART settings on the bench before final deployment.
 - The LoRa pair should be configured so the radios act as a transparent serial link for this first version.
-- This first version does not add a custom protocol, batching, or sender-side metadata.
+- This first version does not add a custom protocol or sender-side metadata. The only sender-side pacing is latest-packet coalescing to stay within the practical LoRa link budget.
 
 For this project, both SX1268 modules should also be checked for:
 
@@ -338,6 +341,8 @@ If the LoRa LEDs flash but the dashboard stays empty, the most likely causes are
 - the two HATs do not share the same channel, `NETID`, or air speed,
 - fixed-point transmission or RSSI output is enabled, so the receiver no longer sees clean 5-byte eChook packets,
 - the receiver is dropping invalid packets and logging warnings.
+
+If the sender only updates the receiver once on startup and then appears to stop, the most likely cause is that the LoRa-side UART link cannot keep up with the incoming eChook stream. The sender now coalesces packets to reduce that pressure and logs a warning if the LoRa UART write path still times out, which means the bridge is dropping overloaded packets instead of hanging completely.
 
 If you are running the receiver in the foreground, watch the terminal for dropped-packet warnings.
 
@@ -535,6 +540,8 @@ journalctl -u lora-sender -f
 ```
 
 If `journalctl -f` shows nothing, that does not automatically mean the service is stopped. It can also mean the service is running but has not written a new log line yet. Use `systemctl status` and `pgrep -af` to confirm whether it is currently running.
+
+If the sender logs warnings like `LoRa UART write timed out`, the LoRa-side serial link is overloaded or stalled. That points to the sender-to-LoRa path, not the Flask dashboard.
 
 ## Updating a Pi
 

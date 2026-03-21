@@ -208,6 +208,7 @@ For the current bench setup, the sender-side LoRa link itself is still the Raspb
 
 The sender Pi may also:
 - batch multiple eChook packets into a LoRa transmission,
+- coalesce repeated source packets down to the latest packet per telemetry identifier if that is needed to stay within the practical LoRa link capacity,
 - tag packets with sender-side metadata in a future version,
 - merge in GPS or other sensors later.
 
