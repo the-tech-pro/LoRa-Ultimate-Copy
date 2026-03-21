@@ -388,6 +388,8 @@ If your eChook UART is not actually `115200`, change only `--source-baudrate` to
 
 If you want the apps to start automatically on boot and restart after a crash, install them as `systemd` services.
 
+The generated services now wait for the configured serial devices and add a short startup delay at boot. That helps with the common Raspberry Pi case where the USB UART or Pi UART is not fully settled yet during early boot.
+
 ### Receiver Pi service
 
 1. SSH into the receiver Pi and go to the repo:
@@ -541,6 +543,8 @@ journalctl -u lora-sender -f
 
 If `journalctl -f` shows nothing, that does not automatically mean the service is stopped. It can also mean the service is running but has not written a new log line yet. Use `systemctl status` and `pgrep -af` to confirm whether it is currently running.
 
+If the services only work after a manual restart but not immediately after boot, reinstall them with `install_service.sh` and reboot again. The generated units now wait for the serial devices and delay startup slightly to avoid early-boot serial races.
+
 If the sender logs warnings like `LoRa UART write timed out`, the LoRa-side serial link is overloaded or stalled. That points to the sender-to-LoRa path, not the Flask dashboard.
 
 ## Updating a Pi
@@ -575,6 +579,8 @@ What `update_lora.sh` does:
 If no service is installed yet, the script still updates the repo and dependencies, and then you can restart the Python app manually.
 
 If you change the service command itself, such as the serial port or baudrate, rerun `install_service.sh` before `update_lora.sh` so the unit file is rewritten with the new arguments.
+
+If `install_service.sh` itself changes, rerun it on the Pi so the latest unit-file behavior is installed.
 
 ## Next setup improvements
 

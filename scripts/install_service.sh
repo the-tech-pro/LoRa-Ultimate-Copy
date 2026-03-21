@@ -26,6 +26,11 @@ require_value() {
   [[ -n "$value" ]] || die "$flag requires a value"
 }
 
+device_unit_name() {
+  local device_path="$1"
+  systemd-escape -p --suffix=device "$device_path"
+}
+
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 service_user="${SUDO_USER:-$USER}"
 
@@ -38,6 +43,11 @@ service_user="${SUDO_USER:-$USER}"
 
 role="$1"
 shift
+
+startup_delay_seconds="5"
+after_units=("network-online.target" "systemd-udev-settle.service")
+wants_units=("network-online.target" "systemd-udev-settle.service")
+device_paths=()
 
 case "$role" in
   receiver)
@@ -81,6 +91,7 @@ case "$role" in
     service_name="lora-receiver"
     description="eChook LoRa receiver dashboard"
     exec_command="exec .venv/bin/python receiver_app.py --serial-port $(printf '%q' "$serial_port") --baudrate $(printf '%q' "$baudrate") --host $(printf '%q' "$host") --port $(printf '%q' "$port")"
+    device_paths=("$serial_port")
     ;;
   sender)
     source_port=""
@@ -124,6 +135,7 @@ case "$role" in
     service_name="lora-sender"
     description="eChook LoRa sender bridge"
     exec_command="exec .venv/bin/python sender_bridge_app.py --source-port $(printf '%q' "$source_port") --lora-port $(printf '%q' "$lora_port") --source-baudrate $(printf '%q' "$source_baudrate") --lora-baudrate $(printf '%q' "$lora_baudrate")"
+    device_paths=("$source_port" "$lora_port")
     ;;
   -h|--help)
     usage
@@ -134,19 +146,28 @@ case "$role" in
     ;;
 esac
 
+for device_path in "${device_paths[@]}"; do
+  after_units+=("$(device_unit_name "$device_path")")
+  wants_units+=("$(device_unit_name "$device_path")")
+done
+
+after_line="$(IFS=' '; echo "${after_units[*]}")"
+wants_line="$(IFS=' '; echo "${wants_units[*]}")"
+
 service_path="/etc/systemd/system/${service_name}.service"
 
 sudo tee "$service_path" >/dev/null <<EOF
 [Unit]
 Description=${description}
-After=network-online.target
-Wants=network-online.target
+After=${after_line}
+Wants=${wants_line}
 
 [Service]
 Type=simple
 User=${service_user}
 WorkingDirectory=${repo_dir}
 Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/bin/sleep ${startup_delay_seconds}
 ExecStart=/usr/bin/env bash -lc '${exec_command}'
 Restart=always
 RestartSec=2
