@@ -272,6 +272,7 @@ Persistent history is not required for the first version.
 ## Assumptions
 - The eChook UART output used here is the same data stream and packet format as the Bluetooth module output.
 - The current sender-side bench setup uses a USB-to-UART adapter to bring the eChook UART into the sender Pi over USB.
+- The current bench setup uses `115200` baud for the UART links.
 - The exact UART settings used in the current bench setup should be revalidated during implementation.
 - A small amount of receiver-side latency is acceptable as long as the dashboard feels live.
 
@@ -304,6 +305,6 @@ Persistent history is not required for the first version.
 - The implementation works with the existing eChook telemetry format rather than inventing a new one.
 
 ## Open Questions
-- Confirm the final UART settings used between eChook and the sender-side reader.
+- Revalidate that `115200` is the correct UART setting for the final sender-side deployment.
 - Confirm the exact LoRa hardware pair and any constraints they impose on transparent UART forwarding.
 - Decide whether batching is needed for the initial deployment or can wait until after the first end-to-end demo.

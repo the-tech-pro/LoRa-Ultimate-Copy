@@ -19,7 +19,7 @@ LOGGER = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class ReceiverConfig:
     serial_port: str
-    baudrate: int = 9600
+    baudrate: int = 115200
     timeout: float = 0.25
     retry_delay_seconds: float = DEFAULT_SERIAL_RETRY_DELAY_SECONDS
 

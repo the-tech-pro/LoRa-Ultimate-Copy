@@ -10,8 +10,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="eChook UART to LoRa sender bridge")
     parser.add_argument("--source-port", required=True, help="eChook UART device, for example /dev/ttyAMA0")
     parser.add_argument("--lora-port", required=True, help="Sender LoRa serial device, for example /dev/ttyUSB0")
-    parser.add_argument("--source-baudrate", type=int, default=9600, help="eChook UART baudrate")
-    parser.add_argument("--lora-baudrate", type=int, default=9600, help="LoRa UART baudrate")
+    parser.add_argument("--source-baudrate", type=int, default=115200, help="eChook UART baudrate")
+    parser.add_argument("--lora-baudrate", type=int, default=115200, help="LoRa UART baudrate")
     return parser
 
 

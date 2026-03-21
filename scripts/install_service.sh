@@ -4,8 +4,8 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/install_service.sh receiver --serial-port /dev/ttyUSB0 [--baudrate 9600] [--host 0.0.0.0] [--port 5000]
-  ./scripts/install_service.sh sender --source-port /dev/ttyUSB0 --lora-port /dev/serial0 [--source-baudrate 9600] [--lora-baudrate 9600]
+  ./scripts/install_service.sh receiver --serial-port /dev/ttyUSB0 [--baudrate 115200] [--host 0.0.0.0] [--port 5000]
+  ./scripts/install_service.sh sender --source-port /dev/ttyUSB0 --lora-port /dev/serial0 [--source-baudrate 115200] [--lora-baudrate 115200]
 
 This script creates a systemd service file for the current repo checkout.
 After it finishes, enable boot startup with:
@@ -42,7 +42,7 @@ shift
 case "$role" in
   receiver)
     serial_port=""
-    baudrate="9600"
+    baudrate="115200"
     host="0.0.0.0"
     port="5000"
 
@@ -86,8 +86,8 @@ case "$role" in
   sender)
     source_port=""
     lora_port=""
-    source_baudrate="9600"
-    lora_baudrate="9600"
+    source_baudrate="115200"
+    lora_baudrate="115200"
 
     while [[ $# -gt 0 ]]; do
       case "$1" in

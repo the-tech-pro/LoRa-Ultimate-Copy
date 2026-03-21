@@ -18,8 +18,8 @@ LOGGER = logging.getLogger(__name__)
 class SenderBridgeConfig:
     source_port: str
     lora_port: str
-    source_baudrate: int = 9600
-    lora_baudrate: int = 9600
+    source_baudrate: int = 115200
+    lora_baudrate: int = 115200
     timeout: float = 0.25
     retry_delay_seconds: float = DEFAULT_SERIAL_RETRY_DELAY_SECONDS
 

@@ -114,6 +114,67 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+### 4. What `.venv` is and how to use it
+
+`.venv` is a project-local Python environment. It keeps this project's Python packages separate from the rest of the Pi, so `flask` and `pyserial` are installed for this repo without affecting other projects.
+
+When you run:
+
+```bash
+source .venv/bin/activate
+```
+
+your shell switches into that environment. You will usually see `(.venv)` appear at the start of the command prompt.
+
+While it is active:
+
+- `python` means the Python interpreter inside this project
+- `pip` installs packages into this project only
+
+You do not have to keep the virtual environment active all the time, but you do need to use it when installing packages or running this project's Python commands.
+
+There are two valid ways to do that:
+
+1. Activate it first:
+
+```bash
+source .venv/bin/activate
+python receiver_app.py --help
+```
+
+2. Or call the venv Python directly without activating it:
+
+```bash
+.venv/bin/python receiver_app.py --help
+```
+
+If you activated it and want to leave it later, run:
+
+```bash
+deactivate
+```
+
+### 5. If you need to update the repo while still setting up
+
+If you already cloned the repo and created `.venv`, update with:
+
+```bash
+cd ~/LoRa-Ultimate-Copy
+git pull --ff-only
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+If your shell is already showing `(.venv)`, you can skip the `source .venv/bin/activate` line.
+
+If you prefer not to activate the environment, the same update can be done with:
+
+```bash
+cd ~/LoRa-Ultimate-Copy
+git pull --ff-only
+.venv/bin/pip install -r requirements.txt
+```
+
 ## Receiver Pi setup and run
 
 ### Wiring
@@ -130,7 +191,7 @@ You will need the correct Linux serial device, for example:
 
 ```bash
 source .venv/bin/activate
-python3 receiver_app.py --serial-port /dev/ttyUSB0 --baudrate 9600 --host 0.0.0.0 --port 5000
+python3 receiver_app.py --serial-port /dev/ttyUSB0 --baudrate 115200 --host 0.0.0.0 --port 5000
 ```
 
 Then open the dashboard from another device on the same network:
@@ -180,14 +241,14 @@ Examples:
 
 ```bash
 source .venv/bin/activate
-python3 sender_bridge_app.py --source-port /dev/ttyUSB0 --lora-port /dev/serial0 --source-baudrate 9600 --lora-baudrate 9600
+python3 sender_bridge_app.py --source-port /dev/ttyUSB0 --lora-port /dev/serial0 --source-baudrate 115200 --lora-baudrate 115200
 ```
 
 The sender bridge does not decode or transform packets. It validates framing and forwards valid 5-byte packets unchanged, which matches the PRD requirement to preserve the original eChook packet semantics.
 
 ## UART and LoRa notes
 
-- The current code defaults to `9600` baud because the PRD leaves final UART settings as an open question.
+- The current code defaults to `115200` baud because that is the current bench setup.
 - Revalidate the real eChook UART settings on the bench before final deployment.
 - The LoRa pair should be configured so the radios act as a transparent serial link for this first version.
 - This first version does not add a custom protocol, batching, or sender-side metadata.
@@ -223,7 +284,7 @@ cd ~/LoRa-Ultimate-Copy
 2. Install the receiver service file using your actual receiver serial port:
 
 ```bash
-bash ./scripts/install_service.sh receiver --serial-port /dev/ttyUSB0 --baudrate 9600 --host 0.0.0.0 --port 5000
+bash ./scripts/install_service.sh receiver --serial-port /dev/ttyUSB0 --baudrate 115200 --host 0.0.0.0 --port 5000
 ```
 
 3. Enable it to start at boot and start it now:
@@ -255,7 +316,7 @@ cd ~/LoRa-Ultimate-Copy
 2. Install the sender service file using your actual sender-side serial devices:
 
 ```bash
-bash ./scripts/install_service.sh sender --source-port /dev/ttyUSB0 --lora-port /dev/serial0 --source-baudrate 9600 --lora-baudrate 9600
+bash ./scripts/install_service.sh sender --source-port /dev/ttyUSB0 --lora-port /dev/serial0 --source-baudrate 115200 --lora-baudrate 115200
 ```
 
 3. Enable it to start at boot and start it now:
