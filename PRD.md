@@ -4,7 +4,7 @@
 This project replaces the existing eChook Bluetooth link with a LoRa link while keeping the eChook telemetry packet format unchanged. The default system is:
 
 ```text
-eChook -> UART -> Sender Pi -> UART -> LoRa -> air -> LoRa -> Receiver Pi -> Flask dashboard
+eChook -> UART -> USB-to-UART adapter -> USB -> Sender Pi -> UART -> LoRa -> air -> LoRa -> Receiver Pi -> Flask dashboard
 ```
 
 The simpler fallback system is:
@@ -47,7 +47,7 @@ The main design principle is simple:
 ## System Overview
 ### Default architecture: Sender Pi in the car
 ```text
-eChook -> UART -> Sender Raspberry Pi -> UART -> LoRa radio -> air ->
+eChook -> UART -> USB-to-UART adapter -> USB -> Sender Raspberry Pi -> UART -> LoRa radio -> air ->
 LoRa radio -> Receiver Raspberry Pi -> Flask dashboard
 ```
 
@@ -75,6 +75,7 @@ This is acceptable as a simpler fallback, but it is not the default delivery tar
 - eChook controller with UART telemetry output using the same format as its Bluetooth output.
 - Sender side:
   - Default: Raspberry Pi plus LoRa module connected over UART.
+  - Current bench setup: the eChook UART is brought into the sender Pi using a USB-to-UART adapter plugged into the sender Pi over USB.
   - Optional simplified build: LoRa module directly connected to the eChook UART.
 - Receiver side:
   - Raspberry Pi running the receiver and dashboard.
@@ -200,6 +201,8 @@ The sender Pi must:
 - avoid changing the meaning of the original eChook packets,
 - keep the implementation simple in the first version.
 
+For the current bench setup, the eChook UART reaches the sender Pi through a USB-to-UART adapter, so the sender Pi reads the eChook telemetry from a USB serial device.
+
 The sender Pi may also:
 - batch multiple eChook packets into a LoRa transmission,
 - tag packets with sender-side metadata in a future version,
@@ -268,6 +271,7 @@ Persistent history is not required for the first version.
 
 ## Assumptions
 - The eChook UART output used here is the same data stream and packet format as the Bluetooth module output.
+- The current sender-side bench setup uses a USB-to-UART adapter to bring the eChook UART into the sender Pi over USB.
 - The exact UART settings used in the current bench setup should be revalidated during implementation.
 - A small amount of receiver-side latency is acceptable as long as the dashboard feels live.
 

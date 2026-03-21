@@ -5,7 +5,7 @@ This project replaces the eChook Bluetooth link with a LoRa link while keeping t
 The default architecture from `PRD.md` is:
 
 ```text
-eChook -> UART -> Sender Raspberry Pi -> UART -> LoRa -> air -> LoRa -> Receiver Raspberry Pi -> Flask dashboard
+eChook -> UART -> USB-to-UART adapter -> USB -> Sender Raspberry Pi -> UART -> LoRa -> air -> LoRa -> Receiver Raspberry Pi -> Flask dashboard
 ```
 
 The simpler fallback architecture is:
@@ -52,6 +52,7 @@ Files used on the sender Pi:
 What it does:
 
 - reads raw 5-byte telemetry packets from the eChook UART,
+- in the current setup, receives that eChook UART feed through a USB-to-UART adapter plugged into the sender Pi,
 - validates packet framing,
 - forwards valid packets unchanged to the LoRa radio over UART.
 
@@ -151,10 +152,17 @@ What you should see:
 
 The sender Pi sits between the eChook and the sender-side LoRa radio.
 
+In the current setup:
+
+- the eChook UART is connected to a USB-to-UART adapter,
+- that adapter is plugged into the sender Pi over USB,
+- the sender app reads the eChook telemetry from the USB serial device that appears on the Pi,
+- the LoRa module is the second serial link used by the sender Pi.
+
 Expected signal flow:
 
 ```text
-eChook UART -> Sender Pi UART input
+eChook UART -> USB-to-UART adapter -> USB -> Sender Pi serial input
 Sender Pi UART output -> LoRa module UART input
 ```
 
@@ -162,14 +170,14 @@ Use the actual serial device names for your sender Pi and attached radio.
 
 Examples:
 
-- eChook side: `/dev/ttyAMA0`
-- LoRa side: `/dev/ttyUSB0`
+- eChook side via USB-to-UART adapter: `/dev/ttyUSB0`
+- LoRa side: `/dev/ttyAMA0`, `/dev/serial0`, or another USB serial device depending on your wiring
 
 ### Run the sender bridge
 
 ```bash
 source .venv/bin/activate
-python3 sender_bridge_app.py --source-port /dev/ttyAMA0 --lora-port /dev/ttyUSB0 --source-baudrate 9600 --lora-baudrate 9600
+python3 sender_bridge_app.py --source-port /dev/ttyUSB0 --lora-port /dev/serial0 --source-baudrate 9600 --lora-baudrate 9600
 ```
 
 The sender bridge does not decode or transform packets. It validates framing and forwards valid 5-byte packets unchanged, which matches the PRD requirement to preserve the original eChook packet semantics.
