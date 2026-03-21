@@ -278,6 +278,7 @@ Persistent history is not required for the first version.
 - The eChook UART output used here is the same data stream and packet format as the Bluetooth module output.
 - The current sender-side bench setup uses a USB-to-UART adapter only to bring the eChook UART into the sender Pi over USB.
 - The current sender-side and receiver-side SX1268 LoRa HATs are controlled through the Raspberry Pi GPIO/UART connection rather than the HAT USB port.
+- In the current bench setup, the SX1268 HAT UART appears on the Pi as `/dev/ttyS0`.
 - The eChook-side UART in the current bench setup is expected to use `115200` baud.
 - The current working bench setup uses `9600` baud on the sender-side and receiver-side SX1268 HAT UART links.
 - The exact UART settings should still be revalidated if the LoRa module configuration is changed later.

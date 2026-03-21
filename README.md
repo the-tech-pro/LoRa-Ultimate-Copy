@@ -186,7 +186,7 @@ That means:
 
 - the receiver LoRa link is not a USB serial device in the normal Pi setup,
 - the HAT is controlled through the Pi UART on the GPIO header,
-- you should normally use `/dev/serial0` in this project unless your Pi is configured differently.
+- the current bench setup uses `/dev/ttyS0` for the receiver-side SX1268 HAT UART.
 
 Do not use `/dev/ttyUSB0` for the receiver unless you are intentionally using the HAT's USB-to-UART path instead of the Raspberry Pi GPIO/UART path.
 
@@ -221,25 +221,25 @@ ls -l /dev/serial*
 ls -l /dev/ttyS0 /dev/ttyAMA0 2>/dev/null
 ```
 
-In this setup, prefer `/dev/serial0` for the command because it follows the currently selected Pi serial port.
+In the current bench setup, use `/dev/ttyS0` for the receiver command. If your Pi maps the HAT UART differently, override it with the real device you found above.
 
 You will need the correct Linux serial device, for example:
 
-- `/dev/serial0`
 - `/dev/ttyAMA0`
 - `/dev/ttyS0`
+- `/dev/serial0`
 
 ### Run the receiver app
 
 ```bash
 source .venv/bin/activate
-python3 receiver_app.py --serial-port /dev/serial0 --baudrate 9600 --host 0.0.0.0 --port 5000
+python3 receiver_app.py --serial-port /dev/ttyS0 --baudrate 9600 --host 0.0.0.0 --port 5000
 ```
 
 Important:
 
 - the receiver-side SX1268 UART currently works at `9600` in the bench setup,
-- the receiver app now defaults to `9600`,
+- the receiver app now defaults to `/dev/ttyS0` at `9600`,
 - if you intentionally reconfigure both LoRa modules later, change `--baudrate` to match the new LoRa UART setting.
 
 If you get `could not open port`, the most likely causes are:
@@ -291,21 +291,22 @@ Use the actual serial device names for your sender Pi and attached radio.
 Examples:
 
 - eChook side via USB-to-UART adapter: `/dev/ttyUSB0`
-- LoRa side through the SX1268 HAT on GPIO: `/dev/serial0`, `/dev/ttyAMA0`, or `/dev/ttyS0` depending on your Pi serial configuration
+- LoRa side through the SX1268 HAT on GPIO: `/dev/ttyS0` in the current bench setup, or `/dev/ttyAMA0` / `/dev/serial0` if your Pi is configured differently
 
 ### Run the sender bridge
 
 ```bash
 source .venv/bin/activate
-python3 sender_bridge_app.py --source-port /dev/ttyUSB0 --lora-port /dev/serial0 --source-baudrate 115200 --lora-baudrate 9600
+python3 sender_bridge_app.py --source-port /dev/ttyUSB0 --lora-port /dev/ttyS0 --source-baudrate 115200 --lora-baudrate 9600
 ```
 
 Important:
 
 - `source-baudrate` is the eChook side and must match the real eChook UART output,
 - `lora-baudrate` is the SX1268 HAT UART side and must match the radio module UART setting,
-- the current working setup is `--source-baudrate 115200 --lora-baudrate 9600`,
+- the current working setup is `--source-port /dev/ttyUSB0 --lora-port /dev/ttyS0 --source-baudrate 115200 --lora-baudrate 9600`,
 - the sender app now defaults to `115200` for the eChook side and `9600` for the LoRa side,
+- the sender app now defaults the SX1268 HAT LoRa port to `/dev/ttyS0`,
 - if you intentionally reconfigure the SX1268 pair later, change only `--lora-baudrate` to match that new LoRa UART setting.
 
 The sender bridge does not decode or transform packets. It validates framing and forwards valid 5-byte packets unchanged, which matches the PRD requirement to preserve the original eChook packet semantics.
@@ -350,14 +351,14 @@ The current known-good bench commands are:
 
 ```bash
 source .venv/bin/activate
-python3 receiver_app.py --serial-port /dev/serial0 --baudrate 9600 --host 0.0.0.0 --port 5000
+python3 receiver_app.py --serial-port /dev/ttyS0 --baudrate 9600 --host 0.0.0.0 --port 5000
 ```
 
 and on the sender Pi:
 
 ```bash
 source .venv/bin/activate
-python3 sender_bridge_app.py --source-port /dev/ttyUSB0 --lora-port /dev/serial0 --source-baudrate 115200 --lora-baudrate 9600
+python3 sender_bridge_app.py --source-port /dev/ttyUSB0 --lora-port /dev/ttyS0 --source-baudrate 115200 --lora-baudrate 9600
 ```
 
 If your eChook UART is not actually `115200`, change only `--source-baudrate` to the real eChook baud. Keep the receiver `--baudrate` and sender `--lora-baudrate` matched to the SX1268 module UART setting.
@@ -393,7 +394,7 @@ cd ~/LoRa-Ultimate-Copy
 2. Install the receiver service file using your actual receiver serial port:
 
 ```bash
-bash ./scripts/install_service.sh receiver --serial-port /dev/serial0 --baudrate 9600 --host 0.0.0.0 --port 5000
+bash ./scripts/install_service.sh receiver --serial-port /dev/ttyS0 --baudrate 9600 --host 0.0.0.0 --port 5000
 ```
 
 3. Enable it to start at boot and start it now:
@@ -425,7 +426,7 @@ cd ~/LoRa-Ultimate-Copy
 2. Install the sender service file using your actual sender-side serial devices:
 
 ```bash
-bash ./scripts/install_service.sh sender --source-port /dev/ttyUSB0 --lora-port /dev/serial0 --source-baudrate 115200 --lora-baudrate 9600
+bash ./scripts/install_service.sh sender --source-port /dev/ttyUSB0 --lora-port /dev/ttyS0 --source-baudrate 115200 --lora-baudrate 9600
 ```
 
 3. Enable it to start at boot and start it now:

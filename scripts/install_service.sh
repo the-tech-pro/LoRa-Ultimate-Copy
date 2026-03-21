@@ -4,8 +4,8 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/install_service.sh receiver --serial-port /dev/serial0 [--baudrate 9600] [--host 0.0.0.0] [--port 5000]
-  ./scripts/install_service.sh sender --source-port /dev/ttyUSB0 --lora-port /dev/serial0 [--source-baudrate 115200] [--lora-baudrate 9600]
+  ./scripts/install_service.sh receiver [--serial-port /dev/ttyS0] [--baudrate 9600] [--host 0.0.0.0] [--port 5000]
+  ./scripts/install_service.sh sender --source-port /dev/ttyUSB0 [--lora-port /dev/ttyS0] [--source-baudrate 115200] [--lora-baudrate 9600]
 
 This script creates a systemd service file for the current repo checkout.
 After it finishes, enable boot startup with:
@@ -41,7 +41,7 @@ shift
 
 case "$role" in
   receiver)
-    serial_port=""
+    serial_port="/dev/ttyS0"
     baudrate="9600"
     host="0.0.0.0"
     port="5000"
@@ -78,14 +78,13 @@ case "$role" in
       esac
     done
 
-    [[ -n "$serial_port" ]] || die "--serial-port is required for the receiver service"
     service_name="lora-receiver"
     description="eChook LoRa receiver dashboard"
     exec_command="exec .venv/bin/python receiver_app.py --serial-port $(printf '%q' "$serial_port") --baudrate $(printf '%q' "$baudrate") --host $(printf '%q' "$host") --port $(printf '%q' "$port")"
     ;;
   sender)
     source_port=""
-    lora_port=""
+    lora_port="/dev/ttyS0"
     source_baudrate="115200"
     lora_baudrate="9600"
 
@@ -122,7 +121,6 @@ case "$role" in
     done
 
     [[ -n "$source_port" ]] || die "--source-port is required for the sender service"
-    [[ -n "$lora_port" ]] || die "--lora-port is required for the sender service"
     service_name="lora-sender"
     description="eChook LoRa sender bridge"
     exec_command="exec .venv/bin/python sender_bridge_app.py --source-port $(printf '%q' "$source_port") --lora-port $(printf '%q' "$lora_port") --source-baudrate $(printf '%q' "$source_baudrate") --lora-baudrate $(printf '%q' "$lora_baudrate")"
