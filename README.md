@@ -18,8 +18,9 @@ eChook -> UART -> LoRa -> air -> LoRa -> Receiver Raspberry Pi -> Flask dashboar
 
 - [Overview](#overview)
 - [Install](#install)
+- [Setup Wizard](#setup-wizard)
 - [Receiver Pi Setup](#receiver-pi-setup)
-- [Receiver Hotspot Mode](#receiver-hotspot-mode)
+- [Receiver Networking](#receiver-networking)
 - [Sender Pi Setup](#sender-pi-setup)
 - [Manual Run](#manual-run)
 - [Services](#services)
@@ -86,6 +87,25 @@ Sender Pi:
 
 These steps apply to both Pis unless noted otherwise.
 
+### One-Command Install
+
+If the repo is not cloned yet, use:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/the-tech-pro/LoRa-Ultimate-Copy/main/install.sh | bash
+```
+
+That command will:
+
+- fetch the bootstrap installer
+- clone or update the repo in `~/LoRa-Ultimate-Copy`
+- launch the interactive setup wizard
+
+You can still use the manual steps below if you want tighter control.
+
+<details>
+<summary>Manual Install (Advanced)</summary>
+
 ### 1. Install system packages
 
 ```bash
@@ -137,6 +157,36 @@ Leave the virtual environment with:
 ```bash
 deactivate
 ```
+
+</details>
+
+## Setup Wizard
+
+If the repo is already cloned, use:
+
+```bash
+cd ~/LoRa-Ultimate-Copy
+bash ./scripts/setup.sh
+```
+
+The wizard will:
+
+- install system packages
+- create or reuse `.venv`
+- install Python dependencies
+- ask whether this Pi is the `receiver` or `sender`
+- install and enable the correct `systemd` service
+- for the receiver, optionally configure `ethernet`, `hotspot`, or leave networking unchanged
+
+Recommended choices:
+
+- receiver Pi on a Pi 4 B with iPad or laptop access: choose `Receiver Pi`, then `Direct Ethernet`
+- sender Pi in the car: choose `Sender Pi`
+
+The wizard uses the existing installer scripts underneath:
+
+- [install_service.sh](C:/Users/maxdu/Documents/Code%20Projects/Active/LoRa%20Ultimate%20Copy/scripts/install_service.sh)
+- [install_receiver_networking.sh](C:/Users/maxdu/Documents/Code%20Projects/Active/LoRa%20Ultimate%20Copy/scripts/install_receiver_networking.sh)
 
 ## Receiver Pi Setup
 
@@ -197,30 +247,92 @@ Then open the dashboard from another device on the same network:
 http://<receiver-pi-ip>:5000
 ```
 
-## Receiver Hotspot Mode
+## Receiver Networking
 
-If you want the receiver Pi to be the only Wi-Fi network for the dashboard, use the hotspot installer below on the receiver Pi.
+Use a single script for receiver-side dashboard networking:
+
+- [install_receiver_networking.sh](C:/Users/maxdu/Documents/Code%20Projects/Active/LoRa%20Ultimate%20Copy/scripts/install_receiver_networking.sh)
+
+For most users, [setup.sh](C:/Users/maxdu/Documents/Code%20Projects/Active/LoRa%20Ultimate%20Copy/scripts/setup.sh) is the easier path.
+Use `install_receiver_networking.sh` directly only if you are changing receiver networking after initial setup.
 
 This stays inside the PRD:
 
 - the dashboard is still local-only
-- phones and laptops connect directly to the receiver Pi network
-- no cloud or internet service is required for the dashboard itself
+- the receiver Pi still hosts the Flask dashboard
+- no cloud or internet service is required for dashboard access
+
+Available modes:
+
+- `ethernet` for a direct wired connection to a laptop or iPad
+- `hotspot` for a dedicated Wi-Fi network from the receiver Pi
+
+### Ethernet Mode
+
+For a Raspberry Pi 4 B, direct wired Ethernet is the more reliable way to connect an iPad or laptop to the dashboard.
+
+What this changes:
+
+- the receiver Pi uses its built-in `eth0` port
+- the directly connected client gets an IP on that cable link
+- the dashboard is reachable at `http://192.168.7.1:5000`
+- this does not use Raspberry Pi USB gadget mode
+
+Install it:
+
+```bash
+cd ~/LoRa-Ultimate-Copy
+bash ./scripts/install_receiver_networking.sh ethernet
+sudo reboot
+```
+
+Default Ethernet values:
+
+- receiver Ethernet IP: `192.168.7.1`
+- client DHCP range: `192.168.7.20` to `192.168.7.150`
+- dashboard URL: `http://192.168.7.1:5000`
+
+Useful optional flags:
+
+```bash
+bash ./scripts/install_receiver_networking.sh ethernet \
+  --eth eth0 \
+  --address 192.168.7.1 \
+  --dhcp-start 192.168.7.20 \
+  --dhcp-end 192.168.7.150 \
+  --port 5000
+```
+
+How to use it with an iPad or laptop:
+
+1. Power the receiver Pi from its normal power supply.
+2. Connect the client device through a USB-C to Ethernet adapter.
+3. Connect that adapter to the receiver Pi `eth0` port with a normal Ethernet cable.
+4. Open `http://192.168.7.1:5000`.
+
+Important:
+
+- for a Pi 4 B, this is the preferred wired path instead of USB gadget mode
+- direct Ethernet does not depend on Wi-Fi hotspot mode
+- the dashboard works over this link because the receiver app already binds to `0.0.0.0`
+
+### Hotspot Mode
+
+Use this if you want the receiver Pi to be the only Wi-Fi network for the dashboard.
 
 What this changes:
 
 - `wlan0` becomes a dedicated receiver hotspot
-- the receiver Pi serves a fixed dashboard address
-- the dashboard stays at `0.0.0.0` and is reachable at `http://192.168.50.1:5000`
+- the receiver Pi serves the dashboard at `http://192.168.50.1:5000`
 - normal Wi-Fi client mode on `wlan0` is turned off
 - on Raspberry Pi OS Bookworm and newer, the script uses NetworkManager for the hotspot
 - on older Pi OS images, the script falls back to `hostapd` and `dnsmasq`
 
-### Install the Receiver Hotspot
+Install it:
 
 ```bash
 cd ~/LoRa-Ultimate-Copy
-bash ./scripts/install_receiver_ap.sh
+bash ./scripts/install_receiver_networking.sh hotspot
 sudo reboot
 ```
 
@@ -232,13 +344,13 @@ Default hotspot values:
 - dashboard URL: `http://192.168.50.1:5000`
 - extra local DNS name: `http://dashboard.lora:5000`
 
-These are now hardcoded in [scripts/install_receiver_ap.sh](C:/Users/maxdu/Documents/Code%20Projects/Active/LoRa%20Ultimate%20Copy/scripts/install_receiver_ap.sh).
-If you want to change them later, edit the `ssid` and `passphrase` values near the top of that file.
+These are now hardcoded in [install_receiver_networking.sh](C:/Users/maxdu/Documents/Code%20Projects/Active/LoRa%20Ultimate%20Copy/scripts/install_receiver_networking.sh).
+If you want to change them later, edit the `ssid` and `passphrase` values in that file.
 
 Useful optional flags:
 
 ```bash
-bash ./scripts/install_receiver_ap.sh \
+bash ./scripts/install_receiver_networking.sh hotspot \
   --ssid "egr-echook" \
   --passphrase "Florence!" \
   --country US \
@@ -255,8 +367,6 @@ After reboot:
 1. Connect your phone or laptop to the receiver Pi SSID.
 2. Start or enable the receiver app if it is not already running.
 3. Open `http://192.168.50.1:5000`.
-
-If the hotspot did not appear before, rerun this script once on the receiver Pi with the updated repo and reboot again.
 
 Important:
 
@@ -520,7 +630,7 @@ If the services only work after a manual restart but not immediately after boot,
 
 If the sender logs warnings like `LoRa UART write timed out`, the LoRa-side serial link is overloaded or stalled. That points to the sender-to-LoRa path, not the Flask dashboard.
 
-### Check Receiver Hotspot Mode
+### Check Receiver Networking
 
 If you installed receiver hotspot mode, these commands should help:
 
@@ -536,9 +646,23 @@ You want to see:
 - `lora-receiver-ap-network`, `hostapd`, and `dnsmasq` active
 - `wlan0` holding `192.168.50.1/24` unless you chose a different address
 
+If you installed receiver direct Ethernet mode, these commands should help:
+
+```bash
+nmcli connection show --active
+ip addr show eth0
+sudo systemctl status dnsmasq --no-pager
+```
+
+You want to see:
+
+- `eth0` holding `192.168.7.1/24` unless you chose a different address
+- either a NetworkManager Ethernet profile active or `dnsmasq` active on older Pi OS images
+
 ## Repository Layout
 
 ```text
+install.sh             Bootstrap installer that clones the repo and runs setup.sh
 receiver_app.py         Receiver Pi entrypoint
 sender_bridge_app.py    Sender Pi entrypoint
 echook_lora/
@@ -549,8 +673,9 @@ echook_lora/
   state.py              Latest telemetry store and derived status
   dashboard.py          Flask dashboard and JSON endpoint
 scripts/
+  setup.sh              Interactive one-command sender/receiver setup wizard
   install_service.sh    Create a sender or receiver systemd service
-  install_receiver_ap.sh  Configure receiver Pi wlan0 as a dashboard hotspot
+  install_receiver_networking.sh  Configure receiver Pi hotspot or direct Ethernet access
   update_lora.sh        Pull latest code, install deps, and restart services
 tests/
   test_protocol.py      Decoder and packet validation tests
