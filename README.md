@@ -19,6 +19,7 @@ eChook -> UART -> LoRa -> air -> LoRa -> Receiver Raspberry Pi -> Flask dashboar
 - [Overview](#overview)
 - [Install](#install)
 - [Receiver Pi Setup](#receiver-pi-setup)
+- [Receiver Hotspot Mode](#receiver-hotspot-mode)
 - [Sender Pi Setup](#sender-pi-setup)
 - [Manual Run](#manual-run)
 - [Services](#services)
@@ -195,6 +196,65 @@ Then open the dashboard from another device on the same network:
 ```text
 http://<receiver-pi-ip>:5000
 ```
+
+## Receiver Hotspot Mode
+
+If you want the receiver Pi to be the only Wi-Fi network for the dashboard, use the hotspot installer below on the receiver Pi.
+
+This stays inside the PRD:
+
+- the dashboard is still local-only
+- phones and laptops connect directly to the receiver Pi network
+- no cloud or internet service is required for the dashboard itself
+
+What this changes:
+
+- `wlan0` becomes a dedicated receiver hotspot
+- the receiver Pi serves a fixed dashboard address
+- the dashboard stays at `0.0.0.0` and is reachable at `http://192.168.50.1:5000`
+- normal Wi-Fi client mode on `wlan0` is turned off
+
+### Install the Receiver Hotspot
+
+```bash
+cd ~/LoRa-Ultimate-Copy
+bash ./scripts/install_receiver_ap.sh --passphrase "change-this-pass" --ssid "eChook-LoRa"
+sudo reboot
+```
+
+Default hotspot values:
+
+- SSID: `eChook-LoRa`
+- receiver hotspot IP: `192.168.50.1`
+- dashboard URL: `http://192.168.50.1:5000`
+- extra local DNS name: `http://dashboard.lora:5000`
+
+Useful optional flags:
+
+```bash
+bash ./scripts/install_receiver_ap.sh \
+  --ssid "eChook-LoRa" \
+  --passphrase "change-this-pass" \
+  --country US \
+  --wlan wlan0 \
+  --address 192.168.50.1 \
+  --dhcp-start 192.168.50.20 \
+  --dhcp-end 192.168.50.150 \
+  --channel 6 \
+  --port 5000
+```
+
+After reboot:
+
+1. Connect your phone or laptop to the receiver Pi SSID.
+2. Start or enable the receiver app if it is not already running.
+3. Open `http://192.168.50.1:5000`.
+
+Important:
+
+- hotspot mode is for the receiver Pi only
+- hotspot mode does not change the LoRa UART setup
+- with AP-only Wi-Fi, repo updates need Ethernet or another separate internet path
 
 ## Sender Pi Setup
 
@@ -452,6 +512,22 @@ If the services only work after a manual restart but not immediately after boot,
 
 If the sender logs warnings like `LoRa UART write timed out`, the LoRa-side serial link is overloaded or stalled. That points to the sender-to-LoRa path, not the Flask dashboard.
 
+### Check Receiver Hotspot Mode
+
+If you installed receiver hotspot mode, these commands should help:
+
+```bash
+sudo systemctl status lora-receiver-ap-network --no-pager
+sudo systemctl status hostapd --no-pager
+sudo systemctl status dnsmasq --no-pager
+ip addr show wlan0
+```
+
+You want to see:
+
+- `lora-receiver-ap-network`, `hostapd`, and `dnsmasq` active
+- `wlan0` holding `192.168.50.1/24` unless you chose a different address
+
 ## Repository Layout
 
 ```text
@@ -466,6 +542,7 @@ echook_lora/
   dashboard.py          Flask dashboard and JSON endpoint
 scripts/
   install_service.sh    Create a sender or receiver systemd service
+  install_receiver_ap.sh  Configure receiver Pi wlan0 as a dashboard hotspot
   update_lora.sh        Pull latest code, install deps, and restart services
 tests/
   test_protocol.py      Decoder and packet validation tests
