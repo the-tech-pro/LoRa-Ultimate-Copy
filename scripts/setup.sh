@@ -196,6 +196,7 @@ configure_receiver() {
   receiver_baudrate="$(prompt_with_default "Receiver LoRa baudrate" "9600")"
   receiver_dashboard_host="$(prompt_with_default "Receiver dashboard bind host" "0.0.0.0")"
   receiver_dashboard_port="$(prompt_with_default "Receiver dashboard port" "5000")"
+  receiver_install_service="y"
   receiver_networking_mode="none"
   receiver_eth_interface=""
   receiver_wlan_interface=""
@@ -212,18 +213,27 @@ configure_receiver() {
   install_python_environment
   run_receiver_networking_install
 
-  bash "$repo_dir/scripts/install_service.sh" receiver \
-    --serial-port "$receiver_serial_port" \
-    --baudrate "$receiver_baudrate" \
-    --host "$receiver_dashboard_host" \
-    --port "$receiver_dashboard_port"
-
-  sudo systemctl enable --now lora-receiver
+  if prompt_yes_no "Install and enable lora-receiver as a boot service?" "y"; then
+    bash "$repo_dir/scripts/install_service.sh" receiver \
+      --serial-port "$receiver_serial_port" \
+      --baudrate "$receiver_baudrate" \
+      --host "$receiver_dashboard_host" \
+      --port "$receiver_dashboard_port"
+    sudo systemctl enable --now lora-receiver
+    receiver_install_service="y"
+  else
+    receiver_install_service="n"
+  fi
 
   echo
   echo "Receiver setup complete."
-  echo "Service: lora-receiver"
   echo "LoRa serial: ${receiver_serial_port} @ ${receiver_baudrate}"
+  if [[ "$receiver_install_service" == "y" ]]; then
+    echo "Service: lora-receiver"
+  else
+    echo "Service: not installed"
+    echo "Run manually with: .venv/bin/python receiver_app.py --serial-port ${receiver_serial_port} --baudrate ${receiver_baudrate} --host ${receiver_dashboard_host} --port ${receiver_dashboard_port}"
+  fi
   case "$receiver_networking_mode" in
     ethernet)
       echo "Dashboard URL: http://${receiver_network_address}:${receiver_dashboard_port}"
@@ -247,22 +257,32 @@ configure_sender() {
   sender_source_baudrate="$(prompt_with_default "eChook source baudrate" "115200")"
   sender_lora_port="$(prompt_with_default "LoRa serial port" "/dev/ttyS0")"
   sender_lora_baudrate="$(prompt_with_default "LoRa baudrate" "9600")"
+  sender_install_service="y"
 
   install_python_environment
 
-  bash "$repo_dir/scripts/install_service.sh" sender \
-    --source-port "$sender_source_port" \
-    --lora-port "$sender_lora_port" \
-    --source-baudrate "$sender_source_baudrate" \
-    --lora-baudrate "$sender_lora_baudrate"
-
-  sudo systemctl enable --now lora-sender
+  if prompt_yes_no "Install and enable lora-sender as a boot service?" "y"; then
+    bash "$repo_dir/scripts/install_service.sh" sender \
+      --source-port "$sender_source_port" \
+      --lora-port "$sender_lora_port" \
+      --source-baudrate "$sender_source_baudrate" \
+      --lora-baudrate "$sender_lora_baudrate"
+    sudo systemctl enable --now lora-sender
+    sender_install_service="y"
+  else
+    sender_install_service="n"
+  fi
 
   echo
   echo "Sender setup complete."
-  echo "Service: lora-sender"
   echo "Source serial: ${sender_source_port} @ ${sender_source_baudrate}"
   echo "LoRa serial: ${sender_lora_port} @ ${sender_lora_baudrate}"
+  if [[ "$sender_install_service" == "y" ]]; then
+    echo "Service: lora-sender"
+  else
+    echo "Service: not installed"
+    echo "Run manually with: .venv/bin/python sender_bridge_app.py --source-port ${sender_source_port} --lora-port ${sender_lora_port} --source-baudrate ${sender_source_baudrate} --lora-baudrate ${sender_lora_baudrate}"
+  fi
 }
 
 [[ $# -eq 0 ]] || {

@@ -175,7 +175,7 @@ The wizard will:
 - create or reuse `.venv`
 - install Python dependencies
 - ask whether this Pi is the `receiver` or `sender`
-- install and enable the correct `systemd` service
+- ask whether to install the correct `systemd` service, with `yes` as the default
 - for the receiver, optionally configure `ethernet`, `hotspot`, or leave networking unchanged
 
 Recommended choices:
