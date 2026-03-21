@@ -8,7 +8,7 @@ import logging
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="eChook LoRa receiver dashboard")
-    parser.add_argument("--serial-port", required=True, help="Receiver LoRa serial device, for example /dev/ttyUSB0")
+    parser.add_argument("--serial-port", required=True, help="Receiver LoRa serial device, for example /dev/serial0")
     parser.add_argument("--baudrate", type=int, default=115200, help="Receiver LoRa UART baudrate")
     parser.add_argument("--host", default="0.0.0.0", help="Flask bind host")
     parser.add_argument("--port", type=int, default=5000, help="Flask bind port")

@@ -53,6 +53,7 @@ What it does:
 
 - reads raw 5-byte telemetry packets from the eChook UART,
 - in the current setup, receives that eChook UART feed through a USB-to-UART adapter plugged into the sender Pi,
+- uses the sender Pi UART on the GPIO header to talk to the sender-side SX1268 LoRa HAT,
 - validates packet framing,
 - forwards valid packets unchanged to the LoRa radio over UART.
 
@@ -179,20 +180,68 @@ git pull --ff-only
 
 ### Wiring
 
-Connect the receiver-side LoRa module UART to the receiver Raspberry Pi UART or USB serial adapter.
+In the current setup, the receiver-side SX1268 LoRa HAT is mounted directly on the Raspberry Pi GPIO header.
+
+That means:
+
+- the receiver LoRa link is not a USB serial device in the normal Pi setup,
+- the HAT is controlled through the Pi UART on the GPIO header,
+- you should normally use `/dev/serial0` in this project unless your Pi is configured differently.
+
+Do not use `/dev/ttyUSB0` for the receiver unless you are intentionally using the HAT's USB-to-UART path instead of the Raspberry Pi GPIO/UART path.
+
+### Receiver HAT configuration
+
+Before running the receiver app, check the SX1268 HAT setup:
+
+1. Put the UART selection jumper on `B` so the LoRa module is controlled by the Raspberry Pi.
+2. Put the module in transmission mode by setting `M0` low and `M1` low, which on the HAT means both jumpers fitted to short them.
+3. Enable the Raspberry Pi serial port:
+
+```bash
+sudo raspi-config
+```
+
+Then choose:
+
+- `Interface Options` -> `Serial Port`
+- `Login shell over serial` -> `No`
+- `Enable serial hardware` -> `Yes`
+
+4. Reboot the Pi:
+
+```bash
+sudo reboot
+```
+
+5. After reboot, confirm which UART device the Pi selected:
+
+```bash
+ls -l /dev/serial*
+ls -l /dev/ttyS0 /dev/ttyAMA0 2>/dev/null
+```
+
+In this setup, prefer `/dev/serial0` for the command because it follows the currently selected Pi serial port.
 
 You will need the correct Linux serial device, for example:
 
-- `/dev/ttyUSB0`
-- `/dev/ttyAMA0`
 - `/dev/serial0`
+- `/dev/ttyAMA0`
+- `/dev/ttyS0`
 
 ### Run the receiver app
 
 ```bash
 source .venv/bin/activate
-python3 receiver_app.py --serial-port /dev/ttyUSB0 --baudrate 115200 --host 0.0.0.0 --port 5000
+python3 receiver_app.py --serial-port /dev/serial0 --baudrate 115200 --host 0.0.0.0 --port 5000
 ```
+
+If you get `could not open port`, the most likely causes are:
+
+- the selected serial port is wrong,
+- the Pi serial port is not enabled yet,
+- the serial login shell is still enabled,
+- the HAT jumpers are not set for Raspberry Pi UART control.
 
 Then open the dashboard from another device on the same network:
 
@@ -221,13 +270,14 @@ In the current setup:
 - the eChook UART is connected to a USB-to-UART adapter,
 - that adapter is plugged into the sender Pi over USB,
 - the sender app reads the eChook telemetry from the USB serial device that appears on the Pi,
-- the LoRa module is the second serial link used by the sender Pi.
+- the sender-side SX1268 LoRa HAT is mounted on the sender Pi GPIO header and uses the Pi UART,
+- the HAT USB connection is not used for the sender LoRa link in this setup.
 
 Expected signal flow:
 
 ```text
 eChook UART -> USB-to-UART adapter -> USB -> Sender Pi serial input
-Sender Pi UART output -> LoRa module UART input
+Sender Pi UART on GPIO header -> SX1268 LoRa HAT
 ```
 
 Use the actual serial device names for your sender Pi and attached radio.
@@ -235,7 +285,7 @@ Use the actual serial device names for your sender Pi and attached radio.
 Examples:
 
 - eChook side via USB-to-UART adapter: `/dev/ttyUSB0`
-- LoRa side: `/dev/ttyAMA0`, `/dev/serial0`, or another USB serial device depending on your wiring
+- LoRa side through the SX1268 HAT on GPIO: `/dev/serial0`, `/dev/ttyAMA0`, or `/dev/ttyS0` depending on your Pi serial configuration
 
 ### Run the sender bridge
 
@@ -284,7 +334,7 @@ cd ~/LoRa-Ultimate-Copy
 2. Install the receiver service file using your actual receiver serial port:
 
 ```bash
-bash ./scripts/install_service.sh receiver --serial-port /dev/ttyUSB0 --baudrate 115200 --host 0.0.0.0 --port 5000
+bash ./scripts/install_service.sh receiver --serial-port /dev/serial0 --baudrate 115200 --host 0.0.0.0 --port 5000
 ```
 
 3. Enable it to start at boot and start it now:

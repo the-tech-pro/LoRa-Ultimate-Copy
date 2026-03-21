@@ -76,10 +76,12 @@ This is acceptable as a simpler fallback, but it is not the default delivery tar
 - Sender side:
   - Default: Raspberry Pi plus LoRa module connected over UART.
   - Current bench setup: the eChook UART is brought into the sender Pi using a USB-to-UART adapter plugged into the sender Pi over USB.
+  - Current bench setup: the sender-side SX1268 LoRa HAT is mounted on the Raspberry Pi GPIO header and controlled through the Pi UART, not through the HAT USB port.
   - Optional simplified build: LoRa module directly connected to the eChook UART.
 - Receiver side:
   - Raspberry Pi running the receiver and dashboard.
   - LoRa module connected to the Pi over UART.
+  - Current bench setup: the receiver-side SX1268 LoRa HAT is mounted on the Raspberry Pi GPIO header and controlled through the Pi UART, not through the HAT USB port.
 
 ## Software Stack
 - Raspberry Pi OS Lite
@@ -202,6 +204,7 @@ The sender Pi must:
 - keep the implementation simple in the first version.
 
 For the current bench setup, the eChook UART reaches the sender Pi through a USB-to-UART adapter, so the sender Pi reads the eChook telemetry from a USB serial device.
+For the current bench setup, the sender-side LoRa link itself is still the Raspberry Pi UART connected to the SX1268 HAT on the GPIO header.
 
 The sender Pi may also:
 - batch multiple eChook packets into a LoRa transmission,
@@ -225,6 +228,8 @@ The receiver Raspberry Pi must:
 - add a receive timestamp because eChook packets do not contain one,
 - store the latest value per telemetry identifier,
 - make the latest decoded state available to the Flask dashboard.
+
+For the current bench setup, the receiver-side UART comes from the SX1268 HAT mounted on the Raspberry Pi GPIO header.
 
 The receiver timestamp is the authoritative timestamp for the first version of the system.
 
@@ -271,7 +276,8 @@ Persistent history is not required for the first version.
 
 ## Assumptions
 - The eChook UART output used here is the same data stream and packet format as the Bluetooth module output.
-- The current sender-side bench setup uses a USB-to-UART adapter to bring the eChook UART into the sender Pi over USB.
+- The current sender-side bench setup uses a USB-to-UART adapter only to bring the eChook UART into the sender Pi over USB.
+- The current sender-side and receiver-side SX1268 LoRa HATs are controlled through the Raspberry Pi GPIO/UART connection rather than the HAT USB port.
 - The current bench setup uses `115200` baud for the UART links.
 - The exact UART settings used in the current bench setup should be revalidated during implementation.
 - A small amount of receiver-side latency is acceptable as long as the dashboard feels live.
