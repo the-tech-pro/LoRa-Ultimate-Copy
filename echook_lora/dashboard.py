@@ -2,67 +2,87 @@
 
 from __future__ import annotations
 
-from typing import Iterable
+import re
 
 from flask import Flask, jsonify, render_template_string
 
-from .constants import PRIMARY_DASHBOARD_IDS
+from .constants import TELEMETRY_DEFINITIONS
 from .state import TelemetryStore
 
-CARD_STYLES = {
-    "s": {
-        "label": "Speed",
-        "accent": "#0f766e",
-        "accent_soft": "rgba(15, 118, 110, 0.18)",
-    },
-    "v": {
-        "label": "Voltage",
-        "accent": "#2563eb",
-        "accent_soft": "rgba(37, 99, 235, 0.16)",
-    },
-    "i": {
-        "label": "Current",
-        "accent": "#d97706",
-        "accent_soft": "rgba(217, 119, 6, 0.18)",
-    },
-    "a": {
-        "label": "Temp 1",
-        "accent": "#dc2626",
-        "accent_soft": "rgba(220, 38, 38, 0.16)",
-    },
-    "b": {
-        "label": "Temp 2",
-        "accent": "#be185d",
-        "accent_soft": "rgba(190, 24, 93, 0.16)",
-    },
-    "c": {
-        "label": "Internal Temp",
-        "accent": "#475569",
-        "accent_soft": "rgba(71, 85, 105, 0.18)",
-    },
+TOP_METRIC_IDS = ("v", "s", "i")
+GRAPH_DEFAULT_IDS = ("s", "v", "i")
+GRAPHABLE_IDS = tuple(packet_id for packet_id in TELEMETRY_DEFINITIONS if packet_id not in {"L", "C", "B"})
+SERIES_STYLES = {
+    "s": {"label": "Speed", "color": "#14b8a6"},
+    "m": {"label": "Motor Speed", "color": "#6366f1"},
+    "i": {"label": "Current", "color": "#f59e0b"},
+    "v": {"label": "Voltage", "color": "#3b82f6"},
+    "w": {"label": "Lower Voltage", "color": "#0ea5e9"},
+    "t": {"label": "Throttle Input", "color": "#22c55e"},
+    "d": {"label": "Throttle Output", "color": "#f97316"},
+    "T": {"label": "Throttle Voltage", "color": "#06b6d4"},
+    "a": {"label": "Temp 1", "color": "#ef4444"},
+    "b": {"label": "Temp 2", "color": "#ec4899"},
+    "c": {"label": "Internal Temp", "color": "#94a3b8"},
+    "r": {"label": "Gear Ratio", "color": "#84cc16"},
+    "V": {"label": "Ref Voltage", "color": "#a3e635"},
 }
-TREND_PANEL_IDS = ("s", "v", "i")
-TEMPERATURE_IDS = ("a", "b", "c")
 
 PAGE_TEMPLATE = """
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="utf-8">
-    <meta http-equiv="refresh" content="1">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>eChook LoRa Dashboard</title>
+    <script>
+      (function() {
+        try {
+          const savedTheme = localStorage.getItem("dashboard-theme");
+          const preferredTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          document.documentElement.dataset.theme = savedTheme || preferredTheme;
+        } catch (error) {
+          document.documentElement.dataset.theme = "light";
+        }
+      }());
+    </script>
     <style>
       :root {
         color-scheme: light;
-        --bg: #edf3f1;
-        --surface: rgba(255, 255, 255, 0.78);
-        --surface-strong: rgba(255, 255, 255, 0.94);
-        --ink: #12202b;
-        --muted: #61707c;
-        --border: rgba(18, 32, 43, 0.10);
-        --shadow: 0 24px 60px rgba(18, 32, 43, 0.10);
+        --page-bg:
+          radial-gradient(circle at top left, rgba(59, 130, 246, 0.14), transparent 28%),
+          radial-gradient(circle at top right, rgba(20, 184, 166, 0.14), transparent 22%),
+          linear-gradient(180deg, #f7fafc 0%, #e7eef5 100%);
+        --surface: rgba(255, 255, 255, 0.82);
+        --surface-strong: rgba(255, 255, 255, 0.96);
+        --surface-soft: rgba(248, 250, 252, 0.82);
+        --ink: #10202d;
+        --muted: #5d6c79;
+        --border: rgba(16, 32, 45, 0.11);
+        --shadow: 0 24px 60px rgba(15, 23, 42, 0.10);
+        --chart-grid: rgba(16, 32, 45, 0.12);
+        --card-highlight: rgba(255, 255, 255, 0.60);
+        --status-ok: #166534;
+        --status-wait: #b45309;
         --mono: "Cascadia Mono", "JetBrains Mono", "Consolas", monospace;
+      }
+      html[data-theme="dark"] {
+        color-scheme: dark;
+        --page-bg:
+          radial-gradient(circle at top left, rgba(37, 99, 235, 0.18), transparent 24%),
+          radial-gradient(circle at top right, rgba(20, 184, 166, 0.14), transparent 22%),
+          linear-gradient(180deg, #08111c 0%, #0e1725 100%);
+        --surface: rgba(12, 20, 31, 0.82);
+        --surface-strong: rgba(14, 24, 36, 0.96);
+        --surface-soft: rgba(18, 30, 46, 0.82);
+        --ink: #e2ebf5;
+        --muted: #8da0b2;
+        --border: rgba(148, 163, 184, 0.18);
+        --shadow: 0 28px 70px rgba(2, 6, 23, 0.42);
+        --chart-grid: rgba(148, 163, 184, 0.16);
+        --card-highlight: rgba(148, 163, 184, 0.08);
+        --status-ok: #4ade80;
+        --status-wait: #fbbf24;
       }
       * { box-sizing: border-box; }
       body {
@@ -70,292 +90,318 @@ PAGE_TEMPLATE = """
         min-height: 100vh;
         font-family: "Avenir Next", "Aptos", "Segoe UI Variable", "Trebuchet MS", sans-serif;
         color: var(--ink);
-        background:
-          radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 32%),
-          radial-gradient(circle at top right, rgba(15, 118, 110, 0.14), transparent 28%),
-          linear-gradient(180deg, #f6f7f2 0%, var(--bg) 100%);
+        background: var(--page-bg);
+      }
+      button,
+      input,
+      table {
+        font: inherit;
       }
       .page {
         max-width: 1260px;
         margin: 0 auto;
-        padding: 28px;
+        padding: 24px;
       }
       .hero,
+      .status-row,
       .metric-grid,
-      .trend-grid {
+      .chart-toolbar,
+      .chart-frame,
+      .chart-footer,
+      .table-top {
         display: grid;
-        gap: 18px;
+        gap: 16px;
       }
       .hero {
-        grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.9fr);
-        margin-bottom: 20px;
-      }
-      .hero-copy,
-      .hero-panel,
-      .metric-card,
-      .trend-card,
-      .table-card {
-        background: var(--surface);
-        border: 1px solid rgba(255, 255, 255, 0.72);
-        box-shadow: var(--shadow);
-        border-radius: 28px;
-        backdrop-filter: blur(16px);
-      }
-      .hero-copy,
-      .hero-panel,
-      .table-card {
-        padding: 24px;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start;
+        margin-bottom: 18px;
       }
       .eyebrow,
       .section-tag,
       .metric-label,
-      .metric-id,
-      .summary-label,
-      .trend-label,
+      .status-label,
+      .selector-meta,
       th {
         margin: 0;
-        font-size: 0.78rem;
-        letter-spacing: 0.12em;
+        font-size: 0.76rem;
+        letter-spacing: 0.14em;
         text-transform: uppercase;
         color: var(--muted);
       }
-      .hero-copy h1,
+      .hero h1,
+      .chart-title,
       .table-title {
         margin: 10px 0 12px;
-        font-size: clamp(2.2rem, 5vw, 4.6rem);
         line-height: 0.92;
         letter-spacing: -0.05em;
       }
+      .hero h1 {
+        font-size: clamp(2.5rem, 5vw, 4.7rem);
+      }
+      .chart-title,
+      .table-title {
+        font-size: clamp(1.8rem, 4vw, 2.8rem);
+      }
+      .hero-copy,
+      .status-card,
+      .metric-card,
+      .chart-card,
+      .table-card {
+        background: var(--surface);
+        border: 1px solid var(--card-highlight);
+        box-shadow: var(--shadow);
+        border-radius: 28px;
+        backdrop-filter: blur(18px);
+      }
+      .hero-copy,
+      .chart-card,
+      .table-card {
+        padding: 24px;
+      }
       .hero-copy p,
-      .hero-note,
+      .chart-note,
       .table-note {
         margin: 0;
-        max-width: 42rem;
+        max-width: 46rem;
+        line-height: 1.6;
         color: var(--muted);
-        line-height: 1.55;
       }
-      .hero-note {
-        margin-top: 16px;
+      .hero-actions {
+        display: flex;
+        justify-content: end;
       }
-      .hero-panel {
-        display: grid;
-        gap: 16px;
-        align-content: start;
+      .theme-toggle {
+        border: 1px solid var(--border);
+        background: var(--surface-strong);
+        color: var(--ink);
+        padding: 12px 16px;
+        border-radius: 999px;
+        cursor: pointer;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      }
+      .theme-toggle:hover {
+        background: var(--surface-soft);
+      }
+      .status-row {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-bottom: 18px;
+      }
+      .status-card,
+      .metric-card {
+        padding: 18px 20px;
+        border: 1px solid var(--border);
+        min-width: 0;
       }
       .status-pill {
         display: inline-flex;
         align-items: center;
         gap: 12px;
         width: fit-content;
-        padding: 12px 16px;
-        border-radius: 999px;
-        background: var(--surface-strong);
-        border: 1px solid var(--border);
-        font-weight: 700;
-      }
-      .status-pill.connected { color: #166534; }
-      .status-pill.waiting { color: #b45309; }
-      .status-pill.waiting .dot { animation: none; }
-      .dot {
-        width: 11px;
-        height: 11px;
-        border-radius: 50%;
-        background: currentColor;
-        box-shadow: 0 0 0 0 currentColor;
-        animation: pulse 2.2s infinite;
-      }
-      .summary-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-        gap: 12px;
-      }
-      .summary-item {
-        padding: 14px 16px;
-        border-radius: 20px;
-        background: var(--surface-strong);
-        border: 1px solid var(--border);
-        min-width: 0;
-      }
-      .summary-value {
-        display: block;
-        margin-top: 6px;
-        font-size: 1rem;
-        line-height: 1.4;
-        overflow-wrap: anywhere;
-      }
-      .summary-value.mono {
-        font-family: var(--mono);
-        font-size: 0.95rem;
-      }
-      .metric-grid {
-        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-        margin-bottom: 20px;
-      }
-      .metric-card,
-      .trend-card {
-        padding: 20px;
-        border: 1px solid var(--border);
-        position: relative;
-        overflow: hidden;
-      }
-      .metric-card::after,
-      .trend-card::after {
-        content: "";
-        position: absolute;
-        inset: auto -30% -55% auto;
-        width: 180px;
-        height: 180px;
-        border-radius: 50%;
-        background: var(--accent-soft, rgba(15, 118, 110, 0.18));
-        filter: blur(10px);
-        pointer-events: none;
-      }
-      .metric-top,
-      .trend-top,
-      .table-top {
-        display: flex;
-        align-items: start;
-        justify-content: space-between;
-        gap: 12px;
-      }
-      .metric-number-row,
-      .trend-value-row {
-        display: flex;
-        align-items: baseline;
-        gap: 10px;
-        margin: 16px 0 8px;
-      }
-      .metric-number,
-      .trend-number {
-        margin: 0;
-        font-size: clamp(2rem, 5vw, 3.2rem);
-        line-height: 0.9;
-        letter-spacing: -0.05em;
-      }
-      .metric-unit,
-      .trend-unit {
-        color: var(--muted);
-        font-size: 1rem;
-        font-weight: 700;
-      }
-      .metric-meta,
-      .trend-meta {
-        margin: 0;
-        color: var(--muted);
-      }
-      .chart-empty {
-        display: grid;
-        place-items: center;
-        min-height: 88px;
-        margin-top: 14px;
-        padding: 14px;
-        border-radius: 18px;
-        border: 1px dashed var(--border);
-        color: var(--muted);
-        background: rgba(255, 255, 255, 0.44);
-        text-align: center;
-      }
-      .sparkline-shell,
-      .trend-chart-shell,
-      .temperature-chart-shell {
-        margin-top: 16px;
-        padding: 10px 12px;
-        border-radius: 20px;
-        background: rgba(255, 255, 255, 0.58);
-        border: 1px solid rgba(255, 255, 255, 0.72);
-      }
-      .sparkline,
-      .trend-chart,
-      .temperature-chart {
-        display: block;
-        width: 100%;
-        height: auto;
-      }
-      .chart-grid,
-      .chart-axis {
-        stroke: rgba(18, 32, 43, 0.12);
-        stroke-width: 1;
-      }
-      .chart-area {
-        fill: var(--accent-soft, rgba(15, 118, 110, 0.18));
-        stroke: none;
-      }
-      .chart-line {
-        fill: none;
-        stroke: var(--accent, #0f766e);
-        stroke-width: 3;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-      }
-      .chart-line.secondary {
-        stroke-width: 2.4;
-      }
-      .chart-footer,
-      .temperature-footer {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-        margin-top: 12px;
-        color: var(--muted);
-        font-size: 0.92rem;
-      }
-      .trend-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        margin-bottom: 20px;
-      }
-      .trend-card h2,
-      .temperature-title {
-        margin: 0;
-        font-size: 1.2rem;
-        letter-spacing: -0.03em;
-      }
-      .trend-updated {
-        margin: 4px 0 0;
-        color: var(--muted);
-        text-align: right;
-      }
-      .temperature-card {
-        display: grid;
-        gap: 14px;
-      }
-      .temperature-list {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-        gap: 10px;
-      }
-      .temperature-item {
         padding: 12px 14px;
-        border-radius: 18px;
-        background: rgba(255, 255, 255, 0.56);
+        border-radius: 999px;
+        font-weight: 700;
+        background: var(--surface-strong);
         border: 1px solid var(--border);
       }
-      .temperature-item strong {
-        display: block;
-        margin-top: 6px;
-        font-size: 1.35rem;
-        letter-spacing: -0.03em;
-      }
-      .swatch {
-        display: inline-flex;
+      .status-pill.connected { color: var(--status-ok); }
+      .status-pill.waiting { color: var(--status-wait); }
+      .dot {
         width: 10px;
         height: 10px;
         border-radius: 50%;
-        margin-right: 8px;
-        vertical-align: middle;
+        background: currentColor;
+        box-shadow: 0 0 0 0 currentColor;
+        animation: pulse 2.1s infinite;
       }
-      .table-card {
+      .status-pill.waiting .dot {
+        animation: none;
+      }
+      .status-value,
+      .metric-value {
+        display: block;
+        margin-top: 8px;
+        font-size: 1.05rem;
+        line-height: 1.4;
+        overflow-wrap: anywhere;
+      }
+      .metric-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin-bottom: 18px;
+      }
+      .metric-card {
+        position: relative;
         overflow: hidden;
       }
-      .table-title {
-        font-size: clamp(1.8rem, 4vw, 2.6rem);
+      .metric-card::after {
+        content: "";
+        position: absolute;
+        inset: auto -24% -46% auto;
+        width: 170px;
+        height: 170px;
+        border-radius: 50%;
+        background: var(--metric-glow, rgba(59, 130, 246, 0.18));
+        filter: blur(12px);
+        pointer-events: none;
+      }
+      .metric-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .metric-number-row {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        margin: 18px 0 8px;
+      }
+      .metric-number {
+        margin: 0;
+        font-size: clamp(2rem, 5vw, 3.4rem);
+        line-height: 0.9;
+        letter-spacing: -0.05em;
+      }
+      .metric-unit {
+        color: var(--muted);
+        font-weight: 700;
+      }
+      .metric-updated {
+        margin: 0;
+        color: var(--muted);
+      }
+      .chart-card {
+        margin-bottom: 18px;
+      }
+      .chart-toolbar {
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start;
+      }
+      .selector-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .selector-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 11px 14px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface-soft);
+        color: var(--muted);
+        cursor: pointer;
+        transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+      }
+      .selector-chip:hover {
+        transform: translateY(-1px);
+      }
+      .selector-chip.active {
+        color: var(--ink);
+        background: var(--surface-strong);
+        border-color: rgba(148, 163, 184, 0.34);
+      }
+      .selector-swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        flex: 0 0 auto;
+      }
+      .selector-label {
+        font-weight: 700;
+      }
+      .selector-value {
+        color: var(--muted);
+        font-size: 0.94rem;
+      }
+      .chart-shell {
+        margin-top: 18px;
+        padding: 18px;
+        border-radius: 24px;
+        background: var(--surface-soft);
+        border: 1px solid var(--border);
+      }
+      .chart-frame {
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: stretch;
+      }
+      .chart-scale {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 8px;
+        min-width: 64px;
+        color: var(--muted);
+        font-size: 0.9rem;
+        padding-right: 10px;
+      }
+      .chart-canvas {
+        position: relative;
+        min-height: 360px;
+      }
+      .chart-svg {
+        width: 100%;
+        height: 360px;
+        display: block;
+      }
+      .chart-grid-line {
+        stroke: var(--chart-grid);
+        stroke-width: 1;
+      }
+      .chart-axis-line {
+        stroke: var(--chart-grid);
+        stroke-width: 1.2;
+      }
+      .chart-path {
+        fill: none;
+        stroke-width: 3.2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .chart-endpoint {
+        stroke: none;
+      }
+      .chart-empty {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 18px;
+        text-align: center;
+        color: var(--muted);
+        border-radius: 20px;
+        border: 1px dashed var(--border);
+        background: rgba(255, 255, 255, 0.10);
+      }
+      .hidden {
+        display: none;
+      }
+      .chart-footer {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin-top: 14px;
+      }
+      .chart-stat {
+        padding: 14px 16px;
+        border-radius: 18px;
+        border: 1px solid var(--border);
+        background: var(--surface-strong);
+      }
+      .chart-stat strong {
+        display: block;
+        margin-top: 6px;
+        font-size: 1rem;
+        overflow-wrap: anywhere;
+      }
+      .table-top {
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start;
       }
       .table-shell {
         overflow-x: auto;
         margin-top: 18px;
         border-radius: 22px;
         border: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.56);
+        background: var(--surface-soft);
       }
       table {
         width: 100%;
@@ -365,32 +411,44 @@ PAGE_TEMPLATE = """
       td {
         padding: 14px 16px;
         text-align: left;
-        border-bottom: 1px solid rgba(18, 32, 43, 0.08);
-      }
-      td {
+        border-bottom: 1px solid var(--border);
         vertical-align: top;
       }
       tr:last-child td {
         border-bottom: 0;
       }
-      .cell-strong {
+      .table-strong {
         font-weight: 700;
-      }
-      .muted {
-        color: var(--muted);
       }
       .mono {
         font-family: var(--mono);
       }
       @keyframes pulse {
-        0% { box-shadow: 0 0 0 0 rgba(22, 101, 52, 0.22); }
-        70% { box-shadow: 0 0 0 12px rgba(22, 101, 52, 0); }
-        100% { box-shadow: 0 0 0 0 rgba(22, 101, 52, 0); }
+        0% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.22); }
+        70% { box-shadow: 0 0 0 12px rgba(74, 222, 128, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
       }
-      @media (max-width: 980px) {
+      @media (max-width: 1080px) {
+        .status-row,
+        .metric-grid,
+        .chart-footer {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 820px) {
         .hero,
-        .trend-grid {
+        .chart-toolbar,
+        .table-top,
+        .chart-frame {
           grid-template-columns: 1fr;
+        }
+        .hero-actions {
+          justify-content: start;
+        }
+        .chart-scale {
+          flex-direction: row;
+          min-width: 0;
+          padding-right: 0;
         }
       }
       @media (max-width: 640px) {
@@ -398,14 +456,20 @@ PAGE_TEMPLATE = """
           padding: 16px;
         }
         .hero-copy,
-        .hero-panel,
+        .status-card,
         .metric-card,
-        .trend-card,
+        .chart-card,
         .table-card {
-          padding: 18px;
           border-radius: 22px;
         }
-        .summary-grid {
+        .hero-copy,
+        .chart-card,
+        .table-card {
+          padding: 18px;
+        }
+        .status-row,
+        .metric-grid,
+        .chart-footer {
           grid-template-columns: 1fr;
         }
         th,
@@ -421,139 +485,81 @@ PAGE_TEMPLATE = """
         <article class="hero-copy">
           <p class="eyebrow">Receiver-side live telemetry</p>
           <h1>eChook LoRa Dashboard</h1>
-          <p>Clean live view of the latest decoded eChook packets. Receiver timestamps stay authoritative, the page refreshes every second, and charts use a small rolling in-memory sample window instead of long-term storage.</p>
-          <p class="hero-note">This keeps the dashboard within the PRD: simple local Flask delivery, no persistent history, and fast reading of speed, voltage, current, and temperatures.</p>
+          <p>Key stats stay on top, one large selectable graph sits in the middle, and the full decoded telemetry table stays below. The chart uses a small rolling in-memory sample window, so it stays inside the PRD without adding persistent history.</p>
         </article>
-        <aside class="hero-panel">
-          <div class="status-pill {{ snapshot.connection_status }}">
+        <div class="hero-actions">
+          <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dashboard theme">Dark mode</button>
+        </div>
+      </section>
+
+      <section class="status-row">
+        <article class="status-card">
+          <p class="status-label">Connection</p>
+          <div id="status-pill" class="status-pill waiting">
             <span class="dot"></span>
-            <span>{{ snapshot.connection_status|capitalize }}</span>
+            <span id="status-text">Waiting</span>
           </div>
-          <div class="summary-grid">
-            <article class="summary-item">
-              <p class="summary-label">Last packet</p>
-              <strong class="summary-value">{{ snapshot.latest_update_display }}</strong>
-            </article>
-            <article class="summary-item">
-              <p class="summary-label">Packet age</p>
-              <strong class="summary-value">{{ snapshot.packet_age_display }}</strong>
-            </article>
-            <article class="summary-item">
-              <p class="summary-label">Last raw packet</p>
-              <strong class="summary-value mono">{{ snapshot.last_raw_packet_hex or "n/a" }}</strong>
-            </article>
-          </div>
-        </aside>
-      </section>
-
-      <section class="metric-grid">
-        {% for card in cards %}
-          <article class="metric-card" style="--accent: {{ card.accent }}; --accent-soft: {{ card.accent_soft }};">
-            <div class="metric-top">
-              <p class="metric-label">{{ card.label }}</p>
-              <p class="metric-id">{{ card.packet_id }}</p>
-            </div>
-            <div class="metric-number-row">
-              <p class="metric-number">{{ card.value }}</p>
-              {% if card.unit %}
-                <span class="metric-unit">{{ card.unit }}</span>
-              {% endif %}
-            </div>
-            <p class="metric-meta">{{ card.meta }}</p>
-
-            {% if card.chart.has_data %}
-              <div class="sparkline-shell">
-                <svg class="sparkline" viewBox="{{ card.chart.viewbox }}" aria-hidden="true">
-                  <line class="chart-grid" x1="0" y1="{{ card.chart.midline_y }}" x2="{{ card.chart.width }}" y2="{{ card.chart.midline_y }}"></line>
-                  <path class="chart-area" d="{{ card.chart.area_path }}"></path>
-                  <path class="chart-line" d="{{ card.chart.line_path }}"></path>
-                </svg>
-              </div>
-              <div class="chart-footer">
-                <span>{{ card.chart.caption }}</span>
-                <span>{{ card.chart.range_label }}</span>
-              </div>
-            {% else %}
-              <div class="chart-empty">Waiting for recent receiver samples.</div>
-            {% endif %}
-          </article>
-        {% endfor %}
-      </section>
-
-      <section class="trend-grid">
-        {% for panel in trend_panels %}
-          <article class="trend-card" style="--accent: {{ panel.accent }}; --accent-soft: {{ panel.accent_soft }};">
-            <div class="trend-top">
-              <div>
-                <p class="trend-label">{{ panel.title }}</p>
-                <div class="trend-value-row">
-                  <p class="trend-number">{{ panel.value }}</p>
-                  {% if panel.unit %}
-                    <span class="trend-unit">{{ panel.unit }}</span>
-                  {% endif %}
-                </div>
-              </div>
-              <p class="trend-updated">{{ panel.updated }}</p>
-            </div>
-
-            {% if panel.chart.has_data %}
-              <div class="trend-chart-shell">
-                <svg class="trend-chart" viewBox="{{ panel.chart.viewbox }}" aria-hidden="true">
-                  <line class="chart-grid" x1="0" y1="{{ panel.chart.topline_y }}" x2="{{ panel.chart.width }}" y2="{{ panel.chart.topline_y }}"></line>
-                  <line class="chart-grid" x1="0" y1="{{ panel.chart.midline_y }}" x2="{{ panel.chart.width }}" y2="{{ panel.chart.midline_y }}"></line>
-                  <line class="chart-axis" x1="0" y1="{{ panel.chart.baseline_y }}" x2="{{ panel.chart.width }}" y2="{{ panel.chart.baseline_y }}"></line>
-                  <path class="chart-area" d="{{ panel.chart.area_path }}"></path>
-                  <path class="chart-line" d="{{ panel.chart.line_path }}"></path>
-                </svg>
-              </div>
-              <div class="chart-footer">
-                <span>{{ panel.chart.caption }}</span>
-                <span>{{ panel.chart.range_label }}</span>
-              </div>
-            {% else %}
-              <div class="chart-empty">Waiting for live samples for this trend.</div>
-            {% endif %}
-          </article>
-        {% endfor %}
-
-        <article class="trend-card temperature-card">
-          <div class="trend-top">
-            <div>
-              <p class="trend-label">Temperature comparison</p>
-              <h2 class="temperature-title">Recent receiver samples</h2>
-            </div>
-            <p class="trend-updated">{{ temperature_panel.updated }}</p>
-          </div>
-
-          <div class="temperature-list">
-            {% for item in temperature_panel.series %}
-              <article class="temperature-item">
-                <p class="summary-label"><span class="swatch" style="background: {{ item.accent }};"></span>{{ item.label }}</p>
-                <strong>{{ item.value }}{% if item.unit %} {{ item.unit }}{% endif %}</strong>
-                <span class="muted">{{ item.updated }}</span>
-              </article>
-            {% endfor %}
-          </div>
-
-          {% if temperature_panel.chart.has_data %}
-            <div class="temperature-chart-shell">
-              <svg class="temperature-chart" viewBox="{{ temperature_panel.chart.viewbox }}" aria-hidden="true">
-                <line class="chart-grid" x1="0" y1="{{ temperature_panel.chart.topline_y }}" x2="{{ temperature_panel.chart.width }}" y2="{{ temperature_panel.chart.topline_y }}"></line>
-                <line class="chart-grid" x1="0" y1="{{ temperature_panel.chart.midline_y }}" x2="{{ temperature_panel.chart.width }}" y2="{{ temperature_panel.chart.midline_y }}"></line>
-                <line class="chart-axis" x1="0" y1="{{ temperature_panel.chart.baseline_y }}" x2="{{ temperature_panel.chart.width }}" y2="{{ temperature_panel.chart.baseline_y }}"></line>
-                {% for line in temperature_panel.chart.lines %}
-                  <path class="chart-line secondary" d="{{ line.path }}" style="stroke: {{ line.color }};"></path>
-                {% endfor %}
-              </svg>
-            </div>
-            <div class="temperature-footer">
-              <span>{{ temperature_panel.chart.caption }}</span>
-              <span>{{ temperature_panel.chart.range_label }}</span>
-            </div>
-          {% else %}
-            <div class="chart-empty">Waiting for recent temperature samples.</div>
-          {% endif %}
         </article>
+        <article class="status-card">
+          <p class="status-label">Last packet</p>
+          <strong id="latest-update" class="status-value">Waiting for packets</strong>
+        </article>
+        <article class="status-card">
+          <p class="status-label">Packet age</p>
+          <strong id="packet-age" class="status-value">Waiting for packets</strong>
+        </article>
+        <article class="status-card">
+          <p class="status-label">Last raw packet</p>
+          <strong id="last-raw-packet" class="status-value mono">n/a</strong>
+        </article>
+      </section>
+
+      <section id="metric-grid" class="metric-grid"></section>
+
+      <section class="chart-card">
+        <div class="chart-toolbar">
+          <div>
+            <p class="section-tag">Live chart</p>
+            <h2 class="chart-title">Selectable telemetry lines</h2>
+            <p class="chart-note">Select the stats you want to compare. The graph auto-scales to the selected series so mixed units still remain readable.</p>
+          </div>
+          <div class="selector-meta">
+            <p class="selector-meta">Recent samples: <strong id="history-limit">{{ snapshot.recent_history_limit }}</strong></p>
+          </div>
+        </div>
+
+        <div id="graph-controls" class="selector-list"></div>
+
+        <div class="chart-shell">
+          <div class="chart-frame">
+            <div class="chart-scale">
+              <span id="chart-max">--</span>
+              <span id="chart-min">--</span>
+            </div>
+            <div class="chart-canvas">
+              <svg id="telemetry-chart" class="chart-svg" viewBox="0 0 1000 360" role="img" aria-label="Telemetry chart">
+                <g id="chart-grid"></g>
+                <g id="chart-lines"></g>
+              </svg>
+              <div id="chart-empty" class="chart-empty hidden">Select at least one stat with live samples to draw the chart.</div>
+            </div>
+          </div>
+
+          <div class="chart-footer">
+            <article class="chart-stat">
+              <p class="status-label">Window</p>
+              <strong id="chart-window">Waiting for data</strong>
+            </article>
+            <article class="chart-stat">
+              <p class="status-label">Value range</p>
+              <strong id="chart-range">Waiting for data</strong>
+            </article>
+            <article class="chart-stat">
+              <p class="status-label">Visible lines</p>
+              <strong id="chart-visible">0 selected</strong>
+            </article>
+          </div>
+        </div>
       </section>
 
       <section class="table-card">
@@ -562,7 +568,7 @@ PAGE_TEMPLATE = """
             <p class="section-tag">All telemetry</p>
             <h2 class="table-title">Latest decoded readings</h2>
           </div>
-          <p class="table-note">Table timestamps are shortened to keep the layout clean on laptop and phone screens.</p>
+          <p class="table-note">The table still shows every latest telemetry value, while the graph focuses on the lines you choose.</p>
         </div>
 
         <div class="table-shell">
@@ -576,25 +582,279 @@ PAGE_TEMPLATE = """
                 <th>Received</th>
               </tr>
             </thead>
-            <tbody>
-              {% for reading in all_readings %}
-                <tr>
-                  <td class="cell-strong mono">{{ reading.packet_id }}</td>
-                  <td>{{ reading.name_display }}</td>
-                  <td class="cell-strong">{{ reading.value_display }}</td>
-                  <td>{{ reading.units_display or "-" }}</td>
-                  <td>{{ reading.received_at_display }}</td>
-                </tr>
-              {% else %}
-                <tr>
-                  <td colspan="5">Waiting for telemetry packets on the LoRa UART.</td>
-                </tr>
-              {% endfor %}
-            </tbody>
+            <tbody id="telemetry-table-body"></tbody>
           </table>
         </div>
       </section>
     </main>
+
+    <script>
+      const initialSnapshot = {{ snapshot|tojson }};
+      const graphOptions = {{ graph_options|tojson }};
+      const topMetricIds = {{ top_metric_ids|tojson }};
+      const graphDefaultIds = {{ graph_default_ids|tojson }};
+      const metricStyles = {{ metric_styles|tojson }};
+      const graphOptionMap = Object.fromEntries(graphOptions.map((option) => [option.packet_id, option]));
+      const storageKeys = {
+        theme: "dashboard-theme",
+        series: "dashboard-series",
+      };
+
+      let currentSnapshot = initialSnapshot;
+      let selectedIds = loadSelectedIds();
+
+      function loadSelectedIds() {
+        try {
+          const saved = JSON.parse(localStorage.getItem(storageKeys.series) || "[]");
+          const validIds = saved.filter((packetId) => graphOptionMap[packetId]);
+          return validIds.length ? validIds : [...graphDefaultIds];
+        } catch (error) {
+          return [...graphDefaultIds];
+        }
+      }
+
+      function saveSelectedIds() {
+        localStorage.setItem(storageKeys.series, JSON.stringify(selectedIds));
+      }
+
+      function formatNumber(value) {
+        const rendered = Number(value).toFixed(2).replace(/\\.00$/, "").replace(/(\\.\\d*[1-9])0+$/, "$1");
+        return rendered === "-0" ? "0" : rendered;
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function readingFor(packetId) {
+        return currentSnapshot.all_readings[packetId] || null;
+      }
+
+      function updateThemeButton() {
+        const button = document.getElementById("theme-toggle");
+        button.textContent = document.documentElement.dataset.theme === "dark" ? "Light mode" : "Dark mode";
+      }
+
+      function toggleTheme() {
+        const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+        document.documentElement.dataset.theme = nextTheme;
+        localStorage.setItem(storageKeys.theme, nextTheme);
+        updateThemeButton();
+      }
+
+      function renderStatus() {
+        const pill = document.getElementById("status-pill");
+        pill.classList.remove("connected", "waiting");
+        pill.classList.add(currentSnapshot.connection_status);
+        document.getElementById("status-text").textContent = currentSnapshot.connection_status.charAt(0).toUpperCase() + currentSnapshot.connection_status.slice(1);
+        document.getElementById("latest-update").textContent = currentSnapshot.latest_update_display || "Waiting for packets";
+        document.getElementById("packet-age").textContent = currentSnapshot.packet_age_display || "Waiting for packets";
+        document.getElementById("last-raw-packet").textContent = currentSnapshot.last_raw_packet_hex || "n/a";
+        document.getElementById("history-limit").textContent = currentSnapshot.recent_history_limit;
+      }
+
+      function renderMetricCards() {
+        const container = document.getElementById("metric-grid");
+        container.innerHTML = topMetricIds.map((packetId) => {
+          const reading = readingFor(packetId);
+          const style = metricStyles[packetId] || { label: packetId, color: "#3b82f6" };
+          const unit = reading && reading.units_display ? reading.units_display : "";
+          const value = reading ? reading.value_display : "--";
+          const meta = reading ? "Updated " + reading.received_at_display : "Waiting for packets";
+          const name = style.label || packetId;
+          return `
+            <article class="metric-card" style="--metric-glow: ${style.glow};">
+              <div class="metric-head">
+                <p class="metric-label">${escapeHtml(name)}</p>
+                <p class="metric-label mono">${escapeHtml(packetId)}</p>
+              </div>
+              <div class="metric-number-row">
+                <p class="metric-number">${escapeHtml(value)}</p>
+                ${unit ? `<span class="metric-unit">${escapeHtml(unit)}</span>` : ""}
+              </div>
+              <p class="metric-updated">${escapeHtml(meta)}</p>
+            </article>
+          `;
+        }).join("");
+      }
+
+      function renderGraphControls() {
+        const container = document.getElementById("graph-controls");
+        container.innerHTML = graphOptions.map((option) => {
+          const reading = readingFor(option.packet_id);
+          const value = reading ? `${reading.value_display}${reading.units_display ? ` ${reading.units_display}` : ""}` : "No data";
+          const active = selectedIds.includes(option.packet_id) ? "active" : "";
+          return `
+            <button type="button" class="selector-chip ${active}" data-packet-id="${escapeHtml(option.packet_id)}" aria-pressed="${active ? "true" : "false"}">
+              <span class="selector-swatch" style="background: ${option.color};"></span>
+              <span class="selector-label">${escapeHtml(option.label)}</span>
+              <span class="selector-value">${escapeHtml(value)}</span>
+            </button>
+          `;
+        }).join("");
+      }
+
+      function buildGridMarkup(width, height, padding) {
+        const lines = [];
+        const usableHeight = height - (padding * 2);
+        for (let index = 0; index <= 4; index += 1) {
+          const y = padding + ((usableHeight / 4) * index);
+          lines.push(`<line class="chart-grid-line" x1="${padding}" y1="${y.toFixed(2)}" x2="${(width - padding).toFixed(2)}" y2="${y.toFixed(2)}"></line>`);
+        }
+        lines.push(`<line class="chart-axis-line" x1="${padding}" y1="${(height - padding).toFixed(2)}" x2="${(width - padding).toFixed(2)}" y2="${(height - padding).toFixed(2)}"></line>`);
+        return lines.join("");
+      }
+
+      function renderChart() {
+        const width = 1000;
+        const height = 360;
+        const padding = 24;
+        const chartGrid = document.getElementById("chart-grid");
+        const chartLines = document.getElementById("chart-lines");
+        const chartEmpty = document.getElementById("chart-empty");
+
+        chartGrid.innerHTML = buildGridMarkup(width, height, padding);
+
+        const selectedSeries = selectedIds
+          .map((packetId) => ({
+            packetId,
+            option: graphOptionMap[packetId],
+            history: currentSnapshot.recent_history[packetId] || [],
+          }))
+          .filter((series) => series.option);
+
+        const liveSeries = selectedSeries.filter((series) => series.history.length > 0);
+        if (!liveSeries.length) {
+          chartLines.innerHTML = "";
+          chartEmpty.classList.remove("hidden");
+          document.getElementById("chart-max").textContent = "--";
+          document.getElementById("chart-min").textContent = "--";
+          document.getElementById("chart-window").textContent = "Waiting for data";
+          document.getElementById("chart-range").textContent = "Waiting for data";
+          document.getElementById("chart-visible").textContent = `${selectedIds.length} selected`;
+          return;
+        }
+
+        const allPoints = liveSeries.flatMap((series) =>
+          series.history.map((point) => ({
+            timestamp: Date.parse(point.received_at),
+            value: Number(point.value),
+          }))
+        );
+
+        let minTime = Math.min(...allPoints.map((point) => point.timestamp));
+        let maxTime = Math.max(...allPoints.map((point) => point.timestamp));
+        let minValue = Math.min(...allPoints.map((point) => point.value));
+        let maxValue = Math.max(...allPoints.map((point) => point.value));
+
+        if (minTime === maxTime) {
+          minTime -= 1000;
+          maxTime += 1000;
+        }
+        if (minValue === maxValue) {
+          const pad = Math.max(Math.abs(minValue) * 0.08, 1);
+          minValue -= pad;
+          maxValue += pad;
+        }
+
+        const usableWidth = width - (padding * 2);
+        const usableHeight = height - (padding * 2);
+        const xFor = (timestamp) => padding + (((timestamp - minTime) / (maxTime - minTime)) * usableWidth);
+        const yFor = (value) => height - padding - (((value - minValue) / (maxValue - minValue)) * usableHeight);
+
+        const lineMarkup = liveSeries.map((series) => {
+          const points = series.history.map((point) => ({
+            x: xFor(Date.parse(point.received_at)),
+            y: yFor(Number(point.value)),
+          }));
+
+          const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
+          const lastPoint = points[points.length - 1];
+          return `
+            <path class="chart-path" d="${path}" style="stroke: ${series.option.color};"></path>
+            <circle class="chart-endpoint" cx="${lastPoint.x.toFixed(2)}" cy="${lastPoint.y.toFixed(2)}" r="4.8" fill="${series.option.color}"></circle>
+          `;
+        }).join("");
+
+        chartLines.innerHTML = lineMarkup;
+        chartEmpty.classList.add("hidden");
+
+        const windowStart = new Date(minTime);
+        const windowEnd = new Date(maxTime);
+        document.getElementById("chart-max").textContent = formatNumber(maxValue);
+        document.getElementById("chart-min").textContent = formatNumber(minValue);
+        document.getElementById("chart-window").textContent = `${windowStart.toISOString().slice(11, 19)} UTC to ${windowEnd.toISOString().slice(11, 19)} UTC`;
+        document.getElementById("chart-range").textContent = `${formatNumber(minValue)} to ${formatNumber(maxValue)}`;
+        document.getElementById("chart-visible").textContent = `${liveSeries.length} visible · ${selectedIds.length} selected`;
+      }
+
+      function renderTable() {
+        const tableBody = document.getElementById("telemetry-table-body");
+        const readings = Object.values(currentSnapshot.all_readings);
+        if (!readings.length) {
+          tableBody.innerHTML = '<tr><td colspan="5">Waiting for telemetry packets on the LoRa UART.</td></tr>';
+          return;
+        }
+
+        tableBody.innerHTML = readings.map((reading) => `
+          <tr>
+            <td class="table-strong mono">${escapeHtml(reading.packet_id)}</td>
+            <td>${escapeHtml(reading.name_display)}</td>
+            <td class="table-strong">${escapeHtml(reading.value_display)}</td>
+            <td>${escapeHtml(reading.units_display || "-")}</td>
+            <td>${escapeHtml(reading.received_at_display)}</td>
+          </tr>
+        `).join("");
+      }
+
+      function render() {
+        renderStatus();
+        renderMetricCards();
+        renderGraphControls();
+        renderChart();
+        renderTable();
+        updateThemeButton();
+      }
+
+      async function fetchState() {
+        try {
+          const response = await fetch("/api/state", { cache: "no-store" });
+          if (!response.ok) {
+            return;
+          }
+          currentSnapshot = await response.json();
+          render();
+        } catch (error) {
+          // Keep the current snapshot on screen if a poll fails.
+        }
+      }
+
+      document.getElementById("theme-toggle").addEventListener("click", toggleTheme);
+      document.getElementById("graph-controls").addEventListener("click", (event) => {
+        const button = event.target.closest("[data-packet-id]");
+        if (!button) {
+          return;
+        }
+
+        const packetId = button.getAttribute("data-packet-id");
+        if (selectedIds.includes(packetId)) {
+          selectedIds = selectedIds.filter((value) => value !== packetId);
+        } else {
+          selectedIds = [...selectedIds, packetId];
+        }
+
+        saveSelectedIds();
+        render();
+      });
+
+      render();
+      window.setInterval(fetchState, 1000);
+    </script>
   </body>
 </html>
 """
@@ -606,31 +866,13 @@ def create_app(store: TelemetryStore) -> Flask:
     @app.get("/")
     def index() -> str:
         snapshot = store.snapshot()
-        cards = [
-            _build_card(
-                packet_id,
-                snapshot["primary"].get(packet_id),
-                snapshot["recent_history"].get(packet_id, []),
-            )
-            for packet_id in PRIMARY_DASHBOARD_IDS
-        ]
-        trend_panels = [
-            _build_trend_panel(
-                packet_id,
-                snapshot["primary"].get(packet_id),
-                snapshot["recent_history"].get(packet_id, []),
-            )
-            for packet_id in TREND_PANEL_IDS
-        ]
-        temperature_panel = _build_temperature_panel(snapshot)
-
         return render_template_string(
             PAGE_TEMPLATE,
             snapshot=snapshot,
-            cards=cards,
-            trend_panels=trend_panels,
-            temperature_panel=temperature_panel,
-            all_readings=list(snapshot["all_readings"].values()),
+            graph_options=_graph_options(),
+            top_metric_ids=list(TOP_METRIC_IDS),
+            graph_default_ids=list(GRAPH_DEFAULT_IDS),
+            metric_styles=_metric_styles(),
         )
 
     @app.get("/api/state")
@@ -640,218 +882,38 @@ def create_app(store: TelemetryStore) -> Flask:
     return app
 
 
-def _build_card(packet_id: str, reading: dict | None, history: list[dict]) -> dict[str, object]:
-    style = CARD_STYLES[packet_id]
-    unit = reading["units_display"] if reading else ""
+def _graph_options() -> list[dict[str, str]]:
+    return [
+        {
+            "packet_id": packet_id,
+            "label": _series_label(packet_id),
+            "color": SERIES_STYLES[packet_id]["color"],
+        }
+        for packet_id in GRAPHABLE_IDS
+    ]
+
+
+def _metric_styles() -> dict[str, dict[str, str]]:
     return {
-        "packet_id": packet_id,
-        "label": style["label"],
-        "value": reading["value_display"] if reading else "--",
-        "unit": unit,
-        "meta": f"Updated {reading['received_at_display']}" if reading else "Waiting for live data",
-        "accent": style["accent"],
-        "accent_soft": style["accent_soft"],
-        "chart": _build_chart(history, accent=style["accent"], accent_soft=style["accent_soft"], width=280, height=92, unit=unit),
+        packet_id: {
+            "label": _series_label(packet_id),
+            "glow": _glow_color(SERIES_STYLES[packet_id]["color"]),
+        }
+        for packet_id in TOP_METRIC_IDS
     }
 
 
-def _build_trend_panel(packet_id: str, reading: dict | None, history: list[dict]) -> dict[str, object]:
-    style = CARD_STYLES[packet_id]
-    unit = reading["units_display"] if reading else ""
-    return {
-        "title": f"{style['label']} trend",
-        "value": reading["value_display"] if reading else "--",
-        "unit": unit,
-        "updated": reading["received_at_display"] if reading else "Waiting for packets",
-        "accent": style["accent"],
-        "accent_soft": style["accent_soft"],
-        "chart": _build_chart(history, accent=style["accent"], accent_soft=style["accent_soft"], width=520, height=190, unit=unit),
-    }
+def _series_label(packet_id: str) -> str:
+    style = SERIES_STYLES.get(packet_id)
+    if style:
+        return style["label"]
+
+    definition = TELEMETRY_DEFINITIONS[packet_id]
+    return re.sub(r"([A-Za-z])(\d)", r"\1 \2", definition.name.replace("_", " ")).title()
 
 
-def _build_temperature_panel(snapshot: dict) -> dict[str, object]:
-    series = []
-    chart_series = []
-    updated_points = []
-
-    for packet_id in TEMPERATURE_IDS:
-        style = CARD_STYLES[packet_id]
-        reading = snapshot["primary"].get(packet_id)
-        history = snapshot["recent_history"].get(packet_id, [])
-        series.append(
-            {
-                "label": style["label"],
-                "value": reading["value_display"] if reading else "--",
-                "unit": reading["units_display"] if reading else "",
-                "updated": reading["received_at_display"] if reading else "Waiting for packets",
-                "accent": style["accent"],
-            }
-        )
-        chart_series.append(
-            {
-                "color": style["accent"],
-                "history": history,
-            }
-        )
-        if reading:
-            updated_points.append((reading["received_at"], reading["received_at_display"]))
-
-    return {
-        "series": series,
-        "updated": max(updated_points)[1] if updated_points else "Waiting for packets",
-        "chart": _build_multi_series_chart(chart_series, width=520, height=190, unit=series[0]["unit"] if series else ""),
-    }
-
-
-def _build_chart(
-    history: list[dict],
-    *,
-    accent: str,
-    accent_soft: str,
-    width: int,
-    height: int,
-    unit: str,
-) -> dict[str, object]:
-    if not history:
-        return {"has_data": False}
-
-    padding = 12
-    values = [point["value"] for point in history]
-    coordinates, baseline_y, topline_y, midline_y = _build_coordinates(values, width=width, height=height, padding=padding)
-    line_path = _line_path(coordinates)
-    area_path = _area_path(coordinates, baseline_y)
-
-    return {
-        "has_data": True,
-        "accent": accent,
-        "accent_soft": accent_soft,
-        "viewbox": f"0 0 {width} {height}",
-        "width": width,
-        "height": height,
-        "topline_y": f"{topline_y:.2f}",
-        "midline_y": f"{midline_y:.2f}",
-        "baseline_y": f"{baseline_y:.2f}",
-        "line_path": line_path,
-        "area_path": area_path,
-        "caption": _sample_caption(len(history)),
-        "range_label": _range_label(min(values), max(values), unit),
-    }
-
-
-def _build_multi_series_chart(
-    series: list[dict[str, object]],
-    *,
-    width: int,
-    height: int,
-    unit: str,
-) -> dict[str, object]:
-    populated_series = [item for item in series if item["history"]]
-    if not populated_series:
-        return {"has_data": False}
-
-    padding = 12
-    values = [point["value"] for item in populated_series for point in item["history"]]
-    chart_lines = []
-    min_value = min(values)
-    max_value = max(values)
-    baseline_y = height - padding
-    topline_y = float(padding)
-    midline_y = height / 2
-
-    for item in populated_series:
-        history = item["history"]
-        coordinates, _, _, _ = _build_coordinates(
-            [point["value"] for point in history],
-            width=width,
-            height=height,
-            padding=padding,
-            min_value=min_value,
-            max_value=max_value,
-        )
-        chart_lines.append(
-            {
-                "path": _line_path(coordinates),
-                "color": item["color"],
-            }
-        )
-
-    sample_count = max(len(item["history"]) for item in populated_series)
-    return {
-        "has_data": True,
-        "viewbox": f"0 0 {width} {height}",
-        "width": width,
-        "height": height,
-        "topline_y": f"{topline_y:.2f}",
-        "midline_y": f"{midline_y:.2f}",
-        "baseline_y": f"{baseline_y:.2f}",
-        "lines": chart_lines,
-        "caption": _sample_caption(sample_count),
-        "range_label": _range_label(min_value, max_value, unit),
-    }
-
-
-def _build_coordinates(
-    values: list[float],
-    *,
-    width: int,
-    height: int,
-    padding: int,
-    min_value: float | None = None,
-    max_value: float | None = None,
-) -> tuple[list[tuple[float, float]], float, float, float]:
-    baseline_y = float(height - padding)
-    topline_y = float(padding)
-    midline_y = height / 2
-    chart_width = width - (padding * 2)
-    chart_height = height - (padding * 2)
-
-    lower = min(values) if min_value is None else min_value
-    upper = max(values) if max_value is None else max_value
-    span = upper - lower
-    if span == 0:
-        span = 1.0
-        lower -= 0.5
-
-    if len(values) == 1:
-        x_positions = [float(padding), float(width - padding)]
-        values = [values[0], values[0]]
-    else:
-        step = chart_width / (len(values) - 1)
-        x_positions = [padding + (index * step) for index in range(len(values))]
-
-    coordinates = []
-    for x, value in zip(x_positions, values):
-        ratio = (value - lower) / span
-        y = baseline_y - (ratio * chart_height)
-        coordinates.append((x, y))
-
-    return coordinates, baseline_y, topline_y, midline_y
-
-
-def _line_path(coordinates: Iterable[tuple[float, float]]) -> str:
-    return " ".join(
-        ("M" if index == 0 else "L") + f" {x:.2f} {y:.2f}"
-        for index, (x, y) in enumerate(coordinates)
-    )
-
-
-def _area_path(coordinates: list[tuple[float, float]], baseline_y: float) -> str:
-    first_x, _ = coordinates[0]
-    last_x, _ = coordinates[-1]
-    return f"{_line_path(coordinates)} L {last_x:.2f} {baseline_y:.2f} L {first_x:.2f} {baseline_y:.2f} Z"
-
-
-def _sample_caption(sample_count: int) -> str:
-    if sample_count == 1:
-        return "1 recent receiver sample"
-    return f"{sample_count} recent receiver samples"
-
-
-def _range_label(min_value: float, max_value: float, unit: str) -> str:
-    suffix = f" {unit}" if unit else ""
-    return f"Range {_format_value(min_value)} to {_format_value(max_value)}{suffix}"
-
-
-def _format_value(value: float) -> str:
-    rendered = f"{value:.2f}".rstrip("0").rstrip(".")
-    return rendered or "0"
+def _glow_color(hex_color: str) -> str:
+    red = int(hex_color[1:3], 16)
+    green = int(hex_color[3:5], 16)
+    blue = int(hex_color[5:7], 16)
+    return f"rgba({red}, {green}, {blue}, 0.18)"

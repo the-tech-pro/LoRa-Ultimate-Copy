@@ -51,6 +51,16 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertIn("UTC", speed["received_at_display"])
         self.assertNotIn("+00:00", speed["received_at_display"])
 
+    def test_snapshot_keeps_recent_history_for_non_primary_telemetry(self) -> None:
+        store = TelemetryStore(recent_history_limit=3)
+        received_at = datetime.now(timezone.utc)
+
+        store.update(build_packet("m", "motor_speed", 4200.0, "RPM", received_at))
+        snapshot = store.snapshot()
+
+        self.assertEqual(snapshot["recent_history"]["m"][0]["value_display"], "4200")
+        self.assertEqual(snapshot["all_readings"]["m"]["name_display"], "Motor Speed")
+
 
 if __name__ == "__main__":
     unittest.main()

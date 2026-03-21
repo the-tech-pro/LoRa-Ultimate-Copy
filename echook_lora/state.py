@@ -46,7 +46,7 @@ class TelemetryStore:
         self._readings: dict[str, TelemetryReading] = {}
         self._recent_history = {
             packet_id: deque(maxlen=recent_history_limit)
-            for packet_id in PRIMARY_DASHBOARD_IDS
+            for packet_id in TELEMETRY_DEFINITIONS
         }
         self._last_packet_at: datetime | None = None
         self._last_raw_packet: bytes | None = None
