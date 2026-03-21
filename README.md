@@ -181,7 +181,7 @@ The wizard will:
 - install system packages
 - create or reuse `.venv`
 - install Python dependencies
-- ask whether this Pi is the `receiver` or `sender`
+- detect whether the Pi hostname looks like `sender` or `receiver`, ask for confirmation, and fall back to a manual role choice if needed
 - ask whether to install the correct `systemd` service, with `yes` as the default
 - for the receiver, optionally configure `ethernet`, `hotspot`, or leave networking unchanged
 

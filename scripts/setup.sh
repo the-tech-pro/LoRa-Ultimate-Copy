@@ -88,6 +88,105 @@ prompt_choice() {
   done
 }
 
+get_current_hostname() {
+  local hostname_value
+
+  hostname_value="$(hostname 2>/dev/null || true)"
+  hostname_value="${hostname_value%%.*}"
+  printf '%s\n' "$hostname_value"
+}
+
+matches_sender_hostname() {
+  local normalized_hostname="$1"
+
+  case "$normalized_hostname" in
+    *sender*|*sendr*|*sndr*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+matches_receiver_hostname() {
+  local normalized_hostname="$1"
+
+  case "$normalized_hostname" in
+    *receiver*|*reciever*|*reciver*|*receiv*|*reciev*|*recv*|*rcvr*|*ecviver*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+detect_role_from_hostname() {
+  local hostname_value="$1"
+  local normalized_hostname
+  local sender_match="n"
+  local receiver_match="n"
+
+  normalized_hostname="$(printf '%s' "$hostname_value" | tr '[:upper:]' '[:lower:]')"
+
+  if matches_sender_hostname "$normalized_hostname"; then
+    sender_match="y"
+  fi
+
+  if matches_receiver_hostname "$normalized_hostname"; then
+    receiver_match="y"
+  fi
+
+  if [[ "$receiver_match" == "y" && "$sender_match" == "n" ]]; then
+    printf 'receiver\n'
+    return 0
+  fi
+
+  if [[ "$sender_match" == "y" && "$receiver_match" == "n" ]]; then
+    printf 'sender\n'
+    return 0
+  fi
+
+  printf 'unknown\n'
+}
+
+choose_role() {
+  local current_hostname
+  local detected_role
+
+  current_hostname="$(get_current_hostname)"
+  detected_role="$(detect_role_from_hostname "$current_hostname")"
+
+  case "$detected_role" in
+    receiver)
+      if [[ -n "$current_hostname" ]]; then
+        printf "Detected hostname: %s\n" "$current_hostname" >&2
+      fi
+      if prompt_yes_no "We detected this Pi is the Receiver Pi. Is that correct?" "y"; then
+        printf '1\n'
+        return 0
+      fi
+      ;;
+    sender)
+      if [[ -n "$current_hostname" ]]; then
+        printf "Detected hostname: %s\n" "$current_hostname" >&2
+      fi
+      if prompt_yes_no "We detected this Pi is the Sender Pi. Is that correct?" "y"; then
+        printf '2\n'
+        return 0
+      fi
+      ;;
+    *)
+      if [[ -n "$current_hostname" ]]; then
+        printf "Hostname '%s' did not clearly match sender or receiver.\n" "$current_hostname" >&2
+      fi
+      ;;
+  esac
+
+  prompt_choice "Choose this Pi's role:" "Receiver Pi" "Sender Pi"
+}
+
 install_python_environment() {
   echo
   echo "Installing system packages"
@@ -306,7 +405,7 @@ echo
 
 sudo -v
 
-role_choice="$(prompt_choice "Choose this Pi's role:" "Receiver Pi" "Sender Pi")"
+role_choice="$(choose_role)"
 reboot_recommended="n"
 
 case "$role_choice" in
