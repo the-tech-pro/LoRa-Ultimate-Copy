@@ -218,23 +218,27 @@ What this changes:
 
 ```bash
 cd ~/LoRa-Ultimate-Copy
-bash ./scripts/install_receiver_ap.sh --passphrase "change-this-pass" --ssid "eChook-LoRa"
+bash ./scripts/install_receiver_ap.sh
 sudo reboot
 ```
 
 Default hotspot values:
 
-- SSID: `eChook-LoRa`
+- SSID: `egr-echook`
+- password: `Florence!`
 - receiver hotspot IP: `192.168.50.1`
 - dashboard URL: `http://192.168.50.1:5000`
 - extra local DNS name: `http://dashboard.lora:5000`
+
+These are now hardcoded in [scripts/install_receiver_ap.sh](C:/Users/maxdu/Documents/Code%20Projects/Active/LoRa%20Ultimate%20Copy/scripts/install_receiver_ap.sh).
+If you want to change them later, edit the `ssid` and `passphrase` values near the top of that file.
 
 Useful optional flags:
 
 ```bash
 bash ./scripts/install_receiver_ap.sh \
-  --ssid "eChook-LoRa" \
-  --passphrase "change-this-pass" \
+  --ssid "egr-echook" \
+  --passphrase "Florence!" \
   --country US \
   --wlan wlan0 \
   --address 192.168.50.1 \

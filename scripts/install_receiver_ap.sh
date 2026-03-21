@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/install_receiver_ap.sh [--ssid eChook-LoRa] --passphrase yourpassword [--country US] [--wlan wlan0] [--address 192.168.50.1] [--dhcp-start 192.168.50.20] [--dhcp-end 192.168.50.150] [--channel 6] [--port 5000]
+  ./scripts/install_receiver_ap.sh [--ssid egr-echook] [--passphrase Florence!] [--country US] [--wlan wlan0] [--address 192.168.50.1] [--dhcp-start 192.168.50.20] [--dhcp-end 192.168.50.150] [--channel 6] [--port 5000]
 
 This script configures the receiver Raspberry Pi to dedicate its Wi-Fi interface to a local access point
 for the dashboard. It installs hostapd and dnsmasq, assigns a fixed receiver IP, and enables boot startup.
@@ -71,13 +71,8 @@ replace_managed_block() {
   rm -f "$tmp_file" "${tmp_file}.new"
 }
 
-[[ $# -ge 1 ]] || {
-  usage
-  exit 1
-}
-
-ssid="eChook-LoRa"
-passphrase=""
+ssid="egr-echook"
+passphrase="Florence!"
 country="US"
 wlan="wlan0"
 address="192.168.50.1"
@@ -143,7 +138,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -n "$passphrase" ]] || die "--passphrase is required"
 [[ ${#passphrase} -ge 8 && ${#passphrase} -le 63 ]] || die "WPA2 passphrase must be between 8 and 63 characters"
 [[ "$country" =~ ^[A-Z]{2}$ ]] || die "--country must be a 2-letter uppercase country code such as US"
 [[ "$channel" =~ ^[0-9]+$ ]] || die "--channel must be a number"
