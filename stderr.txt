@@ -1,0 +1,3 @@
+Choose this Pi role:
+  1. Receiver Pi
+  2. Sender Pi

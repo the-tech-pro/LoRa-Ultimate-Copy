@@ -67,24 +67,24 @@ prompt_choice() {
   local options=("$@")
   local reply
 
-  echo "$prompt"
+  printf '%s\n' "$prompt" >&2
   local index=1
   for option in "${options[@]}"; do
-    echo "  ${index}. ${option}"
+    printf '  %s. %s\n' "$index" "$option" >&2
     index=$((index + 1))
   done
 
   while true; do
     read -r -p "Choose an option [1-${#options[@]}]: " reply
     [[ "$reply" =~ ^[0-9]+$ ]] || {
-      echo "Enter a number."
+      echo "Enter a number." >&2
       continue
     }
     if (( reply >= 1 && reply <= ${#options[@]} )); then
       printf '%s\n' "$reply"
       return 0
     fi
-    echo "Choose a number between 1 and ${#options[@]}."
+    echo "Choose a number between 1 and ${#options[@]}." >&2
   done
 }
 
