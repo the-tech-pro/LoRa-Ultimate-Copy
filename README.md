@@ -182,6 +182,8 @@ The wizard will:
 - create or reuse `.venv`
 - install Python dependencies
 - detect whether the Pi hostname looks like `sender` or `receiver`, ask for confirmation, and fall back to a manual role choice if needed
+- detect likely serial devices from the Pi UART and attached USB serial adapters, then ask for confirmation instead of requiring raw device names up front
+- present the remaining default values as `y/n` confirmation prompts, and only ask for manual text entry if you reject the default
 - ask whether to install the correct `systemd` service, with `yes` as the default
 - for the receiver, optionally configure `ethernet`, `hotspot`, or leave networking unchanged
 

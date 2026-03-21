@@ -29,8 +29,19 @@ prompt_with_default() {
   local default_value="$2"
   local value
 
-  read -r -p "$prompt [$default_value]: " value
-  printf '%s\n' "${value:-$default_value}"
+  if prompt_yes_no "Use default ${prompt}: ${default_value}?" "y"; then
+    printf '%s\n' "$default_value"
+    return 0
+  fi
+
+  while true; do
+    read -r -p "Enter ${prompt}: " value
+    if [[ -n "$value" ]]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+    echo "Value cannot be empty." >&2
+  done
 }
 
 prompt_yes_no() {
@@ -187,6 +198,147 @@ choose_role() {
   prompt_choice "Choose this Pi's role:" "Receiver Pi" "Sender Pi"
 }
 
+collect_existing_paths() {
+  declare -A seen=()
+  local path
+
+  for path in "$@"; do
+    [[ -n "$path" && -e "$path" ]] || continue
+    if [[ -z "${seen[$path]+x}" ]]; then
+      printf '%s\n' "$path"
+      seen["$path"]="1"
+    fi
+  done
+}
+
+get_pi_uart_candidates() {
+  local serial0_target=""
+  local serial1_target=""
+
+  if [[ -e /dev/serial0 ]]; then
+    serial0_target="$(readlink -f /dev/serial0 2>/dev/null || true)"
+  fi
+
+  if [[ -e /dev/serial1 ]]; then
+    serial1_target="$(readlink -f /dev/serial1 2>/dev/null || true)"
+  fi
+
+  collect_existing_paths \
+    "$serial0_target" \
+    "$serial1_target" \
+    "/dev/ttyS0" \
+    "/dev/ttyAMA0" \
+    "/dev/ttyAMA1"
+}
+
+get_usb_serial_candidates() {
+  local path
+  local -a candidates=()
+
+  for path in /dev/ttyUSB* /dev/ttyACM*; do
+    [[ -e "$path" ]] || continue
+    candidates+=("$path")
+  done
+
+  if ((${#candidates[@]} == 0)); then
+    return 0
+  fi
+
+  collect_existing_paths "${candidates[@]}"
+}
+
+remove_path_from_list() {
+  local excluded_path="$1"
+  shift
+  local path
+
+  for path in "$@"; do
+    [[ "$path" == "$excluded_path" ]] && continue
+    printf '%s\n' "$path"
+  done
+}
+
+choose_serial_device() {
+  local prompt="$1"
+  local default_value="$2"
+  local detection_description="$3"
+  shift 3
+  local -a candidates=("$@")
+  local choice
+
+  if ((${#candidates[@]} == 0)); then
+    printf "No %s were auto-detected.\n" "$detection_description" >&2
+    prompt_with_default "$prompt" "$default_value"
+    return 0
+  fi
+
+  if ((${#candidates[@]} == 1)); then
+    printf "Detected %s: %s\n" "$detection_description" "${candidates[0]}" >&2
+    if prompt_yes_no "Use this device for ${prompt}?" "y"; then
+      printf '%s\n' "${candidates[0]}"
+      return 0
+    fi
+
+    prompt_with_default "$prompt" "${candidates[0]}"
+    return 0
+  fi
+
+  choice="$(prompt_choice \
+    "Detected possible ${detection_description}. Choose the device for ${prompt}:" \
+    "${candidates[@]}" \
+    "Enter manually")"
+
+  if (( choice >= 1 && choice <= ${#candidates[@]} )); then
+    printf '%s\n' "${candidates[$((choice - 1))]}"
+    return 0
+  fi
+
+  prompt_with_default "$prompt" "$default_value"
+}
+
+choose_receiver_lora_serial_port() {
+  local -a candidates=()
+
+  mapfile -t candidates < <(get_pi_uart_candidates)
+  choose_serial_device \
+    "Receiver LoRa serial port" \
+    "/dev/ttyS0" \
+    "Raspberry Pi UART serial devices" \
+    "${candidates[@]}"
+}
+
+choose_sender_source_serial_port() {
+  local -a candidates=()
+
+  mapfile -t candidates < <(get_usb_serial_candidates)
+  choose_serial_device \
+    "eChook source serial port" \
+    "/dev/ttyUSB0" \
+    "USB serial devices" \
+    "${candidates[@]}"
+}
+
+choose_sender_lora_serial_port() {
+  local source_port="$1"
+  local -a candidates=()
+  local -a filtered_candidates=()
+
+  mapfile -t candidates < <(get_pi_uart_candidates)
+  if ((${#candidates[@]} > 0)); then
+    mapfile -t filtered_candidates < <(remove_path_from_list "$source_port" "${candidates[@]}")
+  fi
+
+  if ((${#filtered_candidates[@]} == 0)); then
+    filtered_candidates=("${candidates[@]}")
+  fi
+
+  choose_serial_device \
+    "LoRa serial port" \
+    "/dev/ttyS0" \
+    "Raspberry Pi UART serial devices" \
+    "${filtered_candidates[@]}"
+}
+
 install_python_environment() {
   echo
   echo "Installing system packages"
@@ -291,7 +443,7 @@ configure_receiver() {
   echo
   echo "Receiver setup"
 
-  receiver_serial_port="$(prompt_with_default "Receiver LoRa serial port" "/dev/ttyS0")"
+  receiver_serial_port="$(choose_receiver_lora_serial_port)"
   receiver_baudrate="$(prompt_with_default "Receiver LoRa baudrate" "9600")"
   receiver_dashboard_host="$(prompt_with_default "Receiver dashboard bind host" "0.0.0.0")"
   receiver_dashboard_port="$(prompt_with_default "Receiver dashboard port" "5000")"
@@ -352,9 +504,9 @@ configure_sender() {
   echo
   echo "Sender setup"
 
-  sender_source_port="$(prompt_with_default "eChook source serial port" "/dev/ttyUSB0")"
+  sender_source_port="$(choose_sender_source_serial_port)"
   sender_source_baudrate="$(prompt_with_default "eChook source baudrate" "115200")"
-  sender_lora_port="$(prompt_with_default "LoRa serial port" "/dev/ttyS0")"
+  sender_lora_port="$(choose_sender_lora_serial_port "$sender_source_port")"
   sender_lora_baudrate="$(prompt_with_default "LoRa baudrate" "9600")"
   sender_install_service="y"
 
