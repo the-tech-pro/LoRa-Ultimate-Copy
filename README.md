@@ -78,6 +78,9 @@ echook_lora/
   sender_bridge.py      Sender-side UART-to-LoRa bridge
   state.py              Latest telemetry store and derived status
   dashboard.py          Flask dashboard and JSON endpoint
+scripts/
+  install_service.sh    Create a sender or receiver systemd service
+  update_lora.sh        Pull latest code, install deps, and restart services
 ```
 
 ## Raspberry Pi setup
@@ -205,10 +208,119 @@ The sender bridge does not decode or transform packets. It validates framing and
 3. Run `receiver_app.py` on the receiver Pi.
 4. Open the Flask dashboard from the receiver Pi.
 
+## Optional: Run as services
+
+If you want the apps to start automatically on boot and restart after a crash, install them as `systemd` services.
+
+### Receiver Pi service
+
+1. SSH into the receiver Pi and go to the repo:
+
+```bash
+cd ~/LoRa\ Ultimate\ Copy
+```
+
+2. Install the receiver service file using your actual receiver serial port:
+
+```bash
+bash ./scripts/install_service.sh receiver --serial-port /dev/ttyUSB0 --baudrate 9600 --host 0.0.0.0 --port 5000
+```
+
+3. Enable it to start at boot and start it now:
+
+```bash
+sudo systemctl enable --now lora-receiver
+```
+
+4. Check that it is running:
+
+```bash
+sudo systemctl status lora-receiver
+```
+
+5. Follow the logs if needed:
+
+```bash
+journalctl -u lora-receiver -f
+```
+
+### Sender Pi service
+
+1. SSH into the sender Pi and go to the repo:
+
+```bash
+cd ~/LoRa\ Ultimate\ Copy
+```
+
+2. Install the sender service file using your actual sender-side serial devices:
+
+```bash
+bash ./scripts/install_service.sh sender --source-port /dev/ttyUSB0 --lora-port /dev/serial0 --source-baudrate 9600 --lora-baudrate 9600
+```
+
+3. Enable it to start at boot and start it now:
+
+```bash
+sudo systemctl enable --now lora-sender
+```
+
+4. Check that it is running:
+
+```bash
+sudo systemctl status lora-sender
+```
+
+5. Follow the logs if needed:
+
+```bash
+journalctl -u lora-sender -f
+```
+
+### Useful service commands
+
+```bash
+sudo systemctl restart lora-receiver
+sudo systemctl restart lora-sender
+sudo systemctl stop lora-receiver
+sudo systemctl stop lora-sender
+sudo systemctl disable lora-receiver
+sudo systemctl disable lora-sender
+```
+
+## Updating a Pi
+
+### Manual update
+
+If you are not using services yet, update the repo in place and then restart the Python command manually:
+
+```bash
+cd ~/LoRa\ Ultimate\ Copy
+git pull --ff-only
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### One-command update
+
+If the Pi repo was cloned with Git, you can update it with a single command:
+
+```bash
+cd ~/LoRa\ Ultimate\ Copy
+bash ./scripts/update_lora.sh
+```
+
+What `update_lora.sh` does:
+
+- stops if tracked repo files have local changes,
+- runs `git pull --ff-only`,
+- installs Python dependencies from `requirements.txt`,
+- restarts `lora-sender` and/or `lora-receiver` if those services are installed.
+
+If no service is installed yet, the script still updates the repo and dependencies, and then you can restart the Python app manually.
+
 ## Next setup improvements
 
 Useful next steps after bench validation:
 
-- add `systemd` service files for both Pis,
 - add a packet replay or simulator script for testing without hardware,
 - confirm and document the final UART settings and LoRa module configuration.
