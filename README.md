@@ -38,6 +38,7 @@ Receiver Pi:
 - decodes telemetry values
 - adds the authoritative receiver timestamp
 - serves the local Flask dashboard
+- renders short UTC timestamps and lightweight recent-sample charts for the primary live metrics
 
 Sender Pi:
 
@@ -78,6 +79,7 @@ Sender Pi:
 - the sender bridge does not change packet meaning
 - to stay within the practical LoRa link budget, the sender bridge keeps only the latest validated packet per telemetry ID and flushes those latest packets on a short interval
 - this is a Phase 3 hardening step and stays within the PRD
+- the receiver dashboard keeps only a small in-memory recent sample window for live charts and does not persist telemetry history
 
 ## Install
 
