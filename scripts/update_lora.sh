@@ -21,9 +21,19 @@ fi
 echo "Installing Python dependencies"
 ".venv/bin/pip" install -r requirements.txt
 
+service_exists() {
+  local service="$1"
+
+  if [[ -f "/etc/systemd/system/${service}.service" ]] || [[ -f "/lib/systemd/system/${service}.service" ]] || [[ -f "/usr/lib/systemd/system/${service}.service" ]]; then
+    return 0
+  fi
+
+  systemctl cat "${service}.service" >/dev/null 2>&1
+}
+
 services=()
 for service in lora-sender lora-receiver; do
-  if systemctl list-unit-files --type=service --all | grep -Fq "${service}.service"; then
+  if service_exists "$service"; then
     services+=("$service")
   fi
 done

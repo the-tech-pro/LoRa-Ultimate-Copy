@@ -570,9 +570,11 @@ What `update_lora.sh` does:
 - stops if tracked repo files have local changes,
 - runs `git pull --ff-only`,
 - installs Python dependencies from `requirements.txt`,
-- restarts `lora-sender` and/or `lora-receiver` if those services are installed.
+- restarts `lora-sender` and/or `lora-receiver` if those `systemd` service files are installed.
 
 If no service is installed yet, the script still updates the repo and dependencies, and then you can restart the Python app manually.
+
+If you change the service command itself, such as the serial port or baudrate, rerun `install_service.sh` before `update_lora.sh` so the unit file is rewritten with the new arguments.
 
 ## Next setup improvements
 
