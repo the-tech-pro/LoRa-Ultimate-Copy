@@ -8,6 +8,7 @@ Usage:
 
 This script configures the receiver Raspberry Pi to dedicate its Wi-Fi interface to a local access point
 for the dashboard. It installs hostapd and dnsmasq, assigns a fixed receiver IP, and enables boot startup.
+On Raspberry Pi OS Bookworm and newer, it uses NetworkManager instead.
 
 After it finishes, connect a phone or laptop to the new SSID and open:
   http://<address>:<port>
@@ -69,6 +70,25 @@ replace_managed_block() {
 
   sudo install -m 644 "${tmp_file}.new" "$path"
   rm -f "$tmp_file" "${tmp_file}.new"
+}
+
+remove_managed_block() {
+  local path="$1"
+  local begin_marker="$2"
+  local end_marker="$3"
+  local tmp_file
+  tmp_file="$(mktemp)"
+
+  if sudo test -f "$path"; then
+    sudo awk -v begin="$begin_marker" -v end="$end_marker" '
+      $0 == begin { skip=1; next }
+      $0 == end { skip=0; next }
+      !skip { print }
+    ' "$path" >"$tmp_file"
+    sudo install -m 644 "$tmp_file" "$path"
+  fi
+
+  rm -f "$tmp_file"
 }
 
 ssid="egr-echook"
@@ -150,24 +170,27 @@ hostapd_conf="/etc/hostapd/lora-receiver-ap.conf"
 dnsmasq_conf="/etc/dnsmasq.d/lora-receiver-ap.conf"
 network_script="/usr/local/bin/lora-receiver-ap-network.sh"
 network_service="/etc/systemd/system/lora-receiver-ap-network.service"
+hotspot_connection_name="lora-receiver-hotspot"
 ip_command="$(command -v ip || true)"
 rfkill_command="$(command -v rfkill || true)"
 
 [[ -n "$ip_command" ]] || die "The 'ip' command is required"
 [[ -n "$rfkill_command" ]] || rfkill_command="true"
 
-echo "Installing access-point packages"
-sudo apt update
-sudo apt install -y hostapd dnsmasq
+configure_hotspot_with_hostapd() {
+  echo "Using hostapd/dnsmasq hotspot setup"
+  echo "Installing access-point packages"
+  sudo apt update
+  sudo apt install -y hostapd dnsmasq
 
-echo "Writing receiver AP network settings"
-replace_managed_block \
-  "/etc/dhcpcd.conf" \
-  "# BEGIN LORA RECEIVER AP" \
-  "# END LORA RECEIVER AP" \
-  "denyinterfaces ${wlan}"
+  echo "Writing receiver AP network settings"
+  replace_managed_block \
+    "/etc/dhcpcd.conf" \
+    "# BEGIN LORA RECEIVER AP" \
+    "# END LORA RECEIVER AP" \
+    "denyinterfaces ${wlan}"
 
-sudo tee "$hostapd_conf" >/dev/null <<EOF
+  sudo tee "$hostapd_conf" >/dev/null <<EOF
 country_code=${country}
 interface=${wlan}
 driver=nl80211
@@ -185,13 +208,13 @@ wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
 EOF
 
-replace_managed_block \
-  "/etc/default/hostapd" \
-  "# BEGIN LORA RECEIVER AP HOSTAPD" \
-  "# END LORA RECEIVER AP HOSTAPD" \
-  "DAEMON_CONF=\"${hostapd_conf}\""
+  replace_managed_block \
+    "/etc/default/hostapd" \
+    "# BEGIN LORA RECEIVER AP HOSTAPD" \
+    "# END LORA RECEIVER AP HOSTAPD" \
+    "DAEMON_CONF=\"${hostapd_conf}\""
 
-sudo tee "$dnsmasq_conf" >/dev/null <<EOF
+  sudo tee "$dnsmasq_conf" >/dev/null <<EOF
 interface=${wlan}
 bind-dynamic
 domain-needed
@@ -200,7 +223,7 @@ dhcp-range=${dhcp_start},${dhcp_end},255.255.255.0,24h
 address=/dashboard.lora/${address}
 EOF
 
-sudo tee "$network_script" >/dev/null <<EOF
+  sudo tee "$network_script" >/dev/null <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -210,9 +233,9 @@ ${ip_command} addr flush dev ${wlan} || true
 ${ip_command} addr add ${address}/24 dev ${wlan}
 ${ip_command} link set ${wlan} up
 EOF
-sudo chmod 755 "$network_script"
+  sudo chmod 755 "$network_script"
 
-sudo tee "$network_service" >/dev/null <<EOF
+  sudo tee "$network_service" >/dev/null <<EOF
 [Unit]
 Description=eChook LoRa receiver AP static address
 After=network-pre.target
@@ -229,15 +252,62 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 
-echo "Restarting receiver AP services"
-sudo systemctl daemon-reload
-sudo systemctl unmask hostapd >/dev/null 2>&1 || true
-sudo systemctl disable --now wpa_supplicant.service >/dev/null 2>&1 || true
-sudo systemctl disable --now "wpa_supplicant@${wlan}.service" >/dev/null 2>&1 || true
-sudo systemctl restart dhcpcd >/dev/null 2>&1 || true
-sudo systemctl enable --now lora-receiver-ap-network.service
-sudo systemctl enable --now hostapd dnsmasq
-sudo systemctl restart hostapd dnsmasq
+  echo "Restarting receiver AP services"
+  sudo systemctl daemon-reload
+  sudo systemctl unmask hostapd >/dev/null 2>&1 || true
+  sudo systemctl disable --now wpa_supplicant.service >/dev/null 2>&1 || true
+  sudo systemctl disable --now "wpa_supplicant@${wlan}.service" >/dev/null 2>&1 || true
+  sudo systemctl restart dhcpcd >/dev/null 2>&1 || true
+  sudo systemctl enable --now lora-receiver-ap-network.service
+  sudo systemctl enable --now hostapd dnsmasq
+  sudo systemctl restart hostapd dnsmasq
+}
+
+configure_hotspot_with_networkmanager() {
+  echo "Using NetworkManager hotspot setup"
+
+  sudo systemctl enable --now NetworkManager >/dev/null 2>&1 || true
+  sudo systemctl stop hostapd dnsmasq >/dev/null 2>&1 || true
+  sudo systemctl disable hostapd dnsmasq >/dev/null 2>&1 || true
+  sudo systemctl disable --now lora-receiver-ap-network.service >/dev/null 2>&1 || true
+
+  remove_managed_block \
+    "/etc/dhcpcd.conf" \
+    "# BEGIN LORA RECEIVER AP" \
+    "# END LORA RECEIVER AP"
+  remove_managed_block \
+    "/etc/default/hostapd" \
+    "# BEGIN LORA RECEIVER AP HOSTAPD" \
+    "# END LORA RECEIVER AP HOSTAPD"
+
+  sudo rm -f "$hostapd_conf" "$dnsmasq_conf" "$network_script" "$network_service"
+  sudo systemctl daemon-reload
+
+  sudo nmcli radio wifi on
+  sudo nmcli device set "$wlan" managed yes >/dev/null 2>&1 || true
+  sudo nmcli device disconnect "$wlan" >/dev/null 2>&1 || true
+  sudo nmcli connection delete "$hotspot_connection_name" >/dev/null 2>&1 || true
+  sudo nmcli connection add type wifi ifname "$wlan" con-name "$hotspot_connection_name" ssid "$ssid" autoconnect yes
+  sudo nmcli connection modify "$hotspot_connection_name" \
+    802-11-wireless.mode ap \
+    802-11-wireless.band bg \
+    802-11-wireless.channel "$channel" \
+    wifi-sec.key-mgmt wpa-psk \
+    wifi-sec.psk "$passphrase" \
+    ipv4.method shared \
+    ipv4.addresses "${address}/24" \
+    ipv4.shared-dhcp-range "${dhcp_start},${dhcp_end}" \
+    ipv6.method disabled \
+    connection.autoconnect yes \
+    connection.autoconnect-priority 100
+  sudo nmcli connection up "$hotspot_connection_name"
+}
+
+if command -v nmcli >/dev/null 2>&1 && sudo systemctl cat NetworkManager >/dev/null 2>&1; then
+  configure_hotspot_with_networkmanager
+else
+  configure_hotspot_with_hostapd
+fi
 
 echo
 echo "Receiver hotspot configured."

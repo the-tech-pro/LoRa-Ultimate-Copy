@@ -213,6 +213,8 @@ What this changes:
 - the receiver Pi serves a fixed dashboard address
 - the dashboard stays at `0.0.0.0` and is reachable at `http://192.168.50.1:5000`
 - normal Wi-Fi client mode on `wlan0` is turned off
+- on Raspberry Pi OS Bookworm and newer, the script uses NetworkManager for the hotspot
+- on older Pi OS images, the script falls back to `hostapd` and `dnsmasq`
 
 ### Install the Receiver Hotspot
 
@@ -253,6 +255,8 @@ After reboot:
 1. Connect your phone or laptop to the receiver Pi SSID.
 2. Start or enable the receiver app if it is not already running.
 3. Open `http://192.168.50.1:5000`.
+
+If the hotspot did not appear before, rerun this script once on the receiver Pi with the updated repo and reboot again.
 
 Important:
 
