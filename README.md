@@ -101,8 +101,8 @@ Clone the repo or copy this folder onto each Raspberry Pi that needs it.
 Example:
 
 ```bash
-git clone <your-repo-url>
-cd "LoRa Ultimate Copy"
+git clone https://github.com/the-tech-pro/LoRa-Ultimate-Copy
+cd LoRa-Ultimate-Copy
 ```
 
 ### 3. Create a virtual environment
@@ -217,7 +217,7 @@ If you want the apps to start automatically on boot and restart after a crash, i
 1. SSH into the receiver Pi and go to the repo:
 
 ```bash
-cd ~/LoRa\ Ultimate\ Copy
+cd ~/LoRa-Ultimate-Copy
 ```
 
 2. Install the receiver service file using your actual receiver serial port:
@@ -249,7 +249,7 @@ journalctl -u lora-receiver -f
 1. SSH into the sender Pi and go to the repo:
 
 ```bash
-cd ~/LoRa\ Ultimate\ Copy
+cd ~/LoRa-Ultimate-Copy
 ```
 
 2. Install the sender service file using your actual sender-side serial devices:
@@ -294,7 +294,7 @@ sudo systemctl disable lora-sender
 If you are not using services yet, update the repo in place and then restart the Python command manually:
 
 ```bash
-cd ~/LoRa\ Ultimate\ Copy
+cd ~/LoRa-Ultimate-Copy
 git pull --ff-only
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -305,7 +305,7 @@ pip install -r requirements.txt
 If the Pi repo was cloned with Git, you can update it with a single command:
 
 ```bash
-cd ~/LoRa\ Ultimate\ Copy
+cd ~/LoRa-Ultimate-Copy
 bash ./scripts/update_lora.sh
 ```
 
