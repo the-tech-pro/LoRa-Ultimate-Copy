@@ -12,243 +12,256 @@
     </div>
   </section>
 
-  <div class="tabs">
-    <button class="tab-button active" type="button" data-tab="live">Live</button>
-    <button class="tab-button" type="button" data-tab="recordings">Recordings</button>
-    <button class="tab-button" type="button" data-tab="storage">Storage</button>
-    <button class="tab-button" type="button" data-tab="settings">Settings</button>
+  <div class="app-shell">
+    <aside class="sidebar-card">
+      <p class="section-tag">Navigation</p>
+      <h2 class="sidebar-title">Dashboard Pages</h2>
+      <p class="muted">Live telemetry stays separate from saved playback so the receiver Pi always exposes the current feed clearly.</p>
+      <nav class="sidebar-nav" aria-label="Dashboard pages">
+        <button class="tab-button active" type="button" data-tab="live">Live</button>
+        <button class="tab-button" type="button" data-tab="recordings">Recordings</button>
+        <button class="tab-button" type="button" data-tab="storage">Storage</button>
+        <button class="tab-button" type="button" data-tab="settings">Settings</button>
+      </nav>
+    </aside>
+
+    <div class="content-shell">
+      <div id="global-message" class="panel-card hidden"></div>
+
+      <section id="tab-live" class="tab-panel">
+        <article class="recording-banner">
+          <div class="stack">
+            <p class="section-tag">Recording control</p>
+            <div id="recording-pill" class="recording-pill idle">
+              <span class="dot"></span>
+              <span id="recording-pill-text">Idle</span>
+            </div>
+            <p id="recording-copy" class="muted">No recording is active.</p>
+            <p id="recording-blockers" class="notice hidden"></p>
+          </div>
+          <div class="recording-actions">
+            <button id="start-recording" class="button primary" type="button">Start Recording</button>
+            <button id="stop-recording" class="button" type="button">Stop Recording</button>
+            <button id="lap-recording" class="button" type="button">Lap</button>
+          </div>
+        </article>
+
+        <section class="status-row">
+          <article class="status-card">
+            <p class="status-label">Connection</p>
+            <div id="status-pill" class="status-pill waiting">
+              <span class="dot"></span>
+              <span id="status-text">Waiting</span>
+            </div>
+          </article>
+          <article class="status-card">
+            <p class="status-label">Last packet</p>
+            <strong id="latest-update" class="status-value">Waiting for packets</strong>
+          </article>
+          <article class="status-card">
+            <p class="status-label">Packet age</p>
+            <strong id="packet-age" class="status-value">Waiting for packets</strong>
+          </article>
+          <article class="status-card">
+            <p class="status-label">Last raw packet</p>
+            <strong id="last-raw-packet" class="status-value mono">n/a</strong>
+          </article>
+        </section>
+
+        <section id="metric-grid" class="metric-grid"></section>
+
+        <section class="chart-card">
+          <div class="chart-toolbar">
+            <div>
+              <p class="section-tag">Live chart</p>
+              <h2 class="chart-title">Selectable telemetry lines</h2>
+              <p class="chart-note">The graph uses the current rolling receiver history so the live page stays fast and simple.</p>
+            </div>
+            <div class="selector-meta">
+              <p>Recent samples: <strong id="history-limit">{{ initial_state.recent_history_limit }}</strong></p>
+            </div>
+          </div>
+
+          <div id="graph-controls" class="selector-list"></div>
+
+          <div class="chart-shell">
+            <div class="chart-frame">
+              <div class="chart-scale">
+                <span id="chart-max">--</span>
+                <span id="chart-min">--</span>
+              </div>
+              <div class="chart-canvas">
+                <svg id="telemetry-chart" class="chart-svg" viewBox="0 0 1000 360" role="img" aria-label="Telemetry chart">
+                  <g id="chart-grid"></g>
+                  <g id="chart-lines"></g>
+                </svg>
+                <div id="chart-empty" class="chart-empty hidden">Select at least one stat with live samples to draw the chart.</div>
+              </div>
+            </div>
+
+            <div class="chart-footer">
+              <article class="chart-stat">
+                <p class="status-label">Window</p>
+                <strong id="chart-window">Waiting for data</strong>
+              </article>
+              <article class="chart-stat">
+                <p class="status-label">Value range</p>
+                <strong id="chart-range">Waiting for data</strong>
+              </article>
+              <article class="chart-stat">
+                <p class="status-label">Visible lines</p>
+                <strong id="chart-visible">0 selected</strong>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="table-card">
+          <div class="table-top">
+            <div>
+              <p class="section-tag">All telemetry</p>
+              <h2 class="table-title">Latest decoded readings</h2>
+            </div>
+            <p class="table-note">Live readings stay authoritative to the receiver Pi. Recording controls never replace the live feed.</p>
+          </div>
+
+          <div class="table-shell">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Name</th>
+                  <th>Value</th>
+                  <th>Units</th>
+                  <th>Received</th>
+                </tr>
+              </thead>
+              <tbody id="telemetry-table-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="tab-recordings" class="tab-panel hidden">
+        <article class="panel-card">
+          <div class="panel-head">
+            <div>
+              <p class="section-tag">Saved sessions</p>
+              <h2 class="section-title">Recordings</h2>
+              <p class="muted">Open a saved recording to replay it through a dashboard page that behaves like live telemetry.</p>
+            </div>
+            <div class="row-actions">
+              <button id="refresh-recordings" class="button" type="button">Refresh</button>
+            </div>
+          </div>
+
+          <div class="table-shell">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Started</th>
+                  <th>Duration</th>
+                  <th>Laps</th>
+                  <th>Packets</th>
+                  <th>Size</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="recordings-table-body"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section id="tab-storage" class="tab-panel hidden">
+        <article class="panel-card">
+          <div class="panel-head">
+            <div>
+              <p class="section-tag">Receiver Pi storage</p>
+              <h2 class="section-title">Storage</h2>
+              <p class="muted">Recording is blocked automatically if free space drops below the configured reserve or the recording quota is already full.</p>
+            </div>
+          </div>
+
+          <div class="storage-grid">
+            <article class="storage-card">
+              <p class="status-label">Total Disk</p>
+              <strong id="storage-total" class="storage-value">--</strong>
+            </article>
+            <article class="storage-card">
+              <p class="status-label">Free Disk</p>
+              <strong id="storage-free" class="storage-value">--</strong>
+            </article>
+            <article class="storage-card">
+              <p class="status-label">Recordings Used</p>
+              <strong id="storage-recordings" class="storage-value">--</strong>
+            </article>
+            <article class="storage-card">
+              <p class="status-label">Recording Quota</p>
+              <strong id="storage-quota" class="storage-value">--</strong>
+            </article>
+          </div>
+
+          <div class="storage-detail-grid">
+            <article class="setting-card">
+              <p class="section-tag">Recording safety</p>
+              <p id="storage-status-copy" class="muted">--</p>
+            </article>
+            <article class="setting-card">
+              <p class="section-tag">Cleanup tools</p>
+              <p class="muted">Delete closed recordings or purge the oldest saved sessions until the receiver is back under its recording quota.</p>
+              <div class="row-actions">
+                <button id="purge-oldest" class="button" type="button">Purge Oldest</button>
+                <button id="purge-all" class="button danger" type="button">Delete All Closed</button>
+              </div>
+            </article>
+          </div>
+        </article>
+      </section>
+
+      <section id="tab-settings" class="tab-panel hidden">
+        <article class="panel-card">
+          <div class="panel-head">
+            <div>
+              <p class="section-tag">Dashboard defaults</p>
+              <h2 class="section-title">Settings</h2>
+              <p class="muted">These settings live on the receiver Pi and apply to future recordings and playback defaults.</p>
+            </div>
+          </div>
+
+          <form id="settings-form" class="stack">
+            <div class="field-grid">
+              <div class="field">
+                <label for="recording-name-prefix">Recording Name Prefix</label>
+                <input id="recording-name-prefix" name="recording_name_prefix" type="text" required>
+              </div>
+              <div class="field">
+                <label for="default-playback-speed">Default Playback Speed</label>
+                <select id="default-playback-speed" name="default_playback_speed">
+                  <option value="0.5">0.5x</option>
+                  <option value="1" selected>1x</option>
+                  <option value="2">2x</option>
+                  <option value="4">4x</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="recording-quota-mb">Recording Quota (MB)</label>
+                <input id="recording-quota-mb" name="recording_quota_mb" type="number" min="1" step="1" required>
+              </div>
+              <div class="field">
+                <label for="reserved-free-mb">Reserved Free Space (MB)</label>
+                <input id="reserved-free-mb" name="reserved_free_mb" type="number" min="0" step="1" required>
+              </div>
+            </div>
+            <div class="row-actions">
+              <button class="button primary" type="submit">Save Settings</button>
+            </div>
+          </form>
+        </article>
+      </section>
+    </div>
   </div>
-
-  <div id="global-message" class="panel-card hidden"></div>
-
-  <section id="tab-live" class="tab-panel">
-    <article class="recording-banner">
-      <div class="stack">
-        <p class="section-tag">Recording control</p>
-        <div id="recording-pill" class="recording-pill idle">
-          <span class="dot"></span>
-          <span id="recording-pill-text">Idle</span>
-        </div>
-        <p id="recording-copy" class="muted">No recording is active.</p>
-        <p id="recording-blockers" class="notice hidden"></p>
-      </div>
-      <div class="action-group">
-        <button id="start-recording" class="button primary" type="button">Start Recording</button>
-        <button id="stop-recording" class="button" type="button">Stop Recording</button>
-        <button id="lap-recording" class="button" type="button">Lap</button>
-      </div>
-    </article>
-
-    <section class="status-row">
-      <article class="status-card">
-        <p class="status-label">Connection</p>
-        <div id="status-pill" class="status-pill waiting">
-          <span class="dot"></span>
-          <span id="status-text">Waiting</span>
-        </div>
-      </article>
-      <article class="status-card">
-        <p class="status-label">Last packet</p>
-        <strong id="latest-update" class="status-value">Waiting for packets</strong>
-      </article>
-      <article class="status-card">
-        <p class="status-label">Packet age</p>
-        <strong id="packet-age" class="status-value">Waiting for packets</strong>
-      </article>
-      <article class="status-card">
-        <p class="status-label">Last raw packet</p>
-        <strong id="last-raw-packet" class="status-value mono">n/a</strong>
-      </article>
-    </section>
-
-    <section id="metric-grid" class="metric-grid"></section>
-
-    <section class="chart-card">
-      <div class="chart-toolbar">
-        <div>
-          <p class="section-tag">Live chart</p>
-          <h2 class="chart-title">Selectable telemetry lines</h2>
-          <p class="chart-note">The graph uses the current rolling receiver history so the live page stays fast and simple.</p>
-        </div>
-        <div class="selector-meta">
-          <p>Recent samples: <strong id="history-limit">{{ initial_state.recent_history_limit }}</strong></p>
-        </div>
-      </div>
-
-      <div id="graph-controls" class="selector-list"></div>
-
-      <div class="chart-shell">
-        <div class="chart-frame">
-          <div class="chart-scale">
-            <span id="chart-max">--</span>
-            <span id="chart-min">--</span>
-          </div>
-          <div class="chart-canvas">
-            <svg id="telemetry-chart" class="chart-svg" viewBox="0 0 1000 360" role="img" aria-label="Telemetry chart">
-              <g id="chart-grid"></g>
-              <g id="chart-lines"></g>
-            </svg>
-            <div id="chart-empty" class="chart-empty hidden">Select at least one stat with live samples to draw the chart.</div>
-          </div>
-        </div>
-
-        <div class="chart-footer">
-          <article class="chart-stat">
-            <p class="status-label">Window</p>
-            <strong id="chart-window">Waiting for data</strong>
-          </article>
-          <article class="chart-stat">
-            <p class="status-label">Value range</p>
-            <strong id="chart-range">Waiting for data</strong>
-          </article>
-          <article class="chart-stat">
-            <p class="status-label">Visible lines</p>
-            <strong id="chart-visible">0 selected</strong>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <section class="table-card">
-      <div class="table-top">
-        <div>
-          <p class="section-tag">All telemetry</p>
-          <h2 class="table-title">Latest decoded readings</h2>
-        </div>
-        <p class="table-note">Live readings stay authoritative to the receiver Pi. Recording controls never replace the live feed.</p>
-      </div>
-
-      <div class="table-shell">
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Name</th>
-              <th>Value</th>
-              <th>Units</th>
-              <th>Received</th>
-            </tr>
-          </thead>
-          <tbody id="telemetry-table-body"></tbody>
-        </table>
-      </div>
-    </section>
-  </section>
-
-  <section id="tab-recordings" class="tab-panel hidden">
-    <article class="panel-card">
-      <div class="panel-head">
-        <div>
-          <p class="section-tag">Saved sessions</p>
-          <h2 class="section-title">Recordings</h2>
-          <p class="muted">Open a saved recording to replay it through a dashboard page that behaves like live telemetry.</p>
-        </div>
-        <div class="row-actions">
-          <button id="refresh-recordings" class="button" type="button">Refresh</button>
-        </div>
-      </div>
-
-      <div class="table-shell">
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Started</th>
-              <th>Duration</th>
-              <th>Laps</th>
-              <th>Packets</th>
-              <th>Size</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody id="recordings-table-body"></tbody>
-        </table>
-      </div>
-    </article>
-  </section>
-
-  <section id="tab-storage" class="tab-panel hidden">
-    <article class="panel-card">
-      <div class="panel-head">
-        <div>
-          <p class="section-tag">Receiver Pi storage</p>
-          <h2 class="section-title">Storage</h2>
-          <p class="muted">Recording is blocked automatically if free space drops below the configured reserve or the recording quota is already full.</p>
-        </div>
-        <div class="row-actions">
-          <button id="purge-oldest" class="button" type="button">Purge Oldest</button>
-          <button id="purge-all" class="button danger" type="button">Delete All Closed</button>
-        </div>
-      </div>
-
-      <div class="storage-grid">
-        <article class="storage-card">
-          <p class="status-label">Total Disk</p>
-          <strong id="storage-total" class="storage-value">--</strong>
-        </article>
-        <article class="storage-card">
-          <p class="status-label">Free Disk</p>
-          <strong id="storage-free" class="storage-value">--</strong>
-        </article>
-        <article class="storage-card">
-          <p class="status-label">Recordings Used</p>
-          <strong id="storage-recordings" class="storage-value">--</strong>
-        </article>
-        <article class="storage-card">
-          <p class="status-label">Recording Quota</p>
-          <strong id="storage-quota" class="storage-value">--</strong>
-        </article>
-      </div>
-
-      <div class="recording-banner">
-        <div>
-          <p class="section-tag">Recording safety</p>
-          <p id="storage-status-copy" class="muted">--</p>
-        </div>
-      </div>
-    </article>
-  </section>
-
-  <section id="tab-settings" class="tab-panel hidden">
-    <article class="panel-card">
-      <div class="panel-head">
-        <div>
-          <p class="section-tag">Dashboard defaults</p>
-          <h2 class="section-title">Settings</h2>
-          <p class="muted">These settings live on the receiver Pi and apply to future recordings and playback defaults.</p>
-        </div>
-      </div>
-
-      <form id="settings-form" class="stack">
-        <div class="field-grid">
-          <div class="field">
-            <label for="recording-name-prefix">Recording Name Prefix</label>
-            <input id="recording-name-prefix" name="recording_name_prefix" type="text" required>
-          </div>
-          <div class="field">
-            <label for="default-playback-speed">Default Playback Speed</label>
-            <select id="default-playback-speed" name="default_playback_speed">
-              <option value="0.5">0.5x</option>
-              <option value="1" selected>1x</option>
-              <option value="2">2x</option>
-              <option value="4">4x</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="recording-quota-mb">Recording Quota (MB)</label>
-            <input id="recording-quota-mb" name="recording_quota_mb" type="number" min="1" step="1" required>
-          </div>
-          <div class="field">
-            <label for="reserved-free-mb">Reserved Free Space (MB)</label>
-            <input id="reserved-free-mb" name="reserved_free_mb" type="number" min="0" step="1" required>
-          </div>
-        </div>
-        <div class="row-actions">
-          <button class="button primary" type="submit">Save Settings</button>
-        </div>
-      </form>
-    </article>
-  </section>
 {% endblock %}
 
 {% block scripts %}
@@ -344,7 +357,7 @@
 
       if (status.is_recording && status.active_recording) {
         const active = status.active_recording;
-        copy.textContent = `${active.name} • ${active.elapsed_display} • ${active.packet_count} packets • ${active.lap_count} laps`;
+        copy.textContent = `${active.name} | ${active.elapsed_display} | ${active.packet_count} packets | ${active.lap_count} laps`;
       } else {
         copy.textContent = "No recording is active.";
       }
@@ -471,7 +484,7 @@
       document.getElementById("chart-min").textContent = minValue.toFixed(2).replace(/\.00$/, "");
       document.getElementById("chart-window").textContent = `${windowStart.toISOString().slice(11, 19)} UTC to ${windowEnd.toISOString().slice(11, 19)} UTC`;
       document.getElementById("chart-range").textContent = `${minValue.toFixed(2)} to ${maxValue.toFixed(2)}`;
-      document.getElementById("chart-visible").textContent = `${liveSeries.length} visible • ${selectedIds.length} selected`;
+      document.getElementById("chart-visible").textContent = `${liveSeries.length} visible | ${selectedIds.length} selected`;
     }
 
     function renderTable() {
@@ -603,7 +616,7 @@
     }
 
     document.getElementById("theme-toggle").addEventListener("click", toggleTheme);
-    document.querySelector(".tabs").addEventListener("click", (event) => {
+    document.querySelector(".sidebar-nav").addEventListener("click", (event) => {
       const button = event.target.closest("[data-tab]");
       if (button) {
         activateTab(button.dataset.tab);

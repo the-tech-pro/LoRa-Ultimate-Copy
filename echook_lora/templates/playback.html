@@ -21,7 +21,7 @@
       <p id="playback-copy" class="playback-copy">Paused.</p>
       <p id="cursor-display" class="muted">{{ initial_playback.cursor_display or "No data" }}</p>
     </div>
-    <div class="action-group">
+    <div class="recording-actions">
       <button id="playback-toggle" class="button primary" type="button">Play</button>
       <button id="jump-start" class="button" type="button">Start</button>
       <button id="jump-end" class="button" type="button">End</button>
@@ -303,7 +303,7 @@
       document.getElementById("chart-min").textContent = minValue.toFixed(2).replace(/\.00$/, "");
       document.getElementById("chart-window").textContent = `${windowStart.toISOString().slice(11, 19)} UTC to ${windowEnd.toISOString().slice(11, 19)} UTC`;
       document.getElementById("chart-range").textContent = `${minValue.toFixed(2)} to ${maxValue.toFixed(2)}`;
-      document.getElementById("chart-visible").textContent = `${liveSeries.length} visible • ${selectedIds.length} selected`;
+      document.getElementById("chart-visible").textContent = `${liveSeries.length} visible | ${selectedIds.length} selected`;
     }
 
     function renderTable() {
@@ -332,7 +332,7 @@
         container.innerHTML = '<span class="muted">No lap markers were saved for this recording.</span>';
         return;
       }
-      container.innerHTML = laps.map((lap) => `<button class="button" type="button" data-lap-offset="${lap.offset_ms}">${escapeHtml(lap.label)} • ${escapeHtml(lap.offset_display)}</button>`).join("");
+      container.innerHTML = laps.map((lap) => `<button class="button" type="button" data-lap-offset="${lap.offset_ms}">${escapeHtml(lap.label)} | ${escapeHtml(lap.offset_display)}</button>`).join("");
       container.querySelectorAll("[data-lap-offset]").forEach((button) => {
         button.addEventListener("click", () => {
           const offset = Number(button.getAttribute("data-lap-offset"));

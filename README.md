@@ -89,10 +89,11 @@ Sender Pi:
 
 ### Dashboard Tabs
 
+- the main dashboard uses a sidebar to switch between receiver pages quickly without mixing live data and saved playback state
 - `Live` shows the current receiver telemetry, recording status, live graph, and start/stop/lap controls
 - `Recordings` lists saved recordings and links into the dedicated playback page for each session
 - `Storage` shows total disk space, free space, recording usage, quota, and cleanup controls
-- `Settings` stores recording naming and storage defaults on the receiver Pi
+- `Settings` stores recording naming and storage defaults on the receiver Pi, including the default 4 GB recording quota for new installs
 
 ## Install
 
