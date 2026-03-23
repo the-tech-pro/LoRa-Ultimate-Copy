@@ -40,7 +40,9 @@ Receiver Pi:
 - decodes telemetry values
 - adds the authoritative receiver timestamp
 - serves the local Flask dashboard
-- renders short UTC timestamps, a single selectable live graph, and a built-in light/dark theme
+- renders `Live`, `Recordings`, `Storage`, and `Settings` views
+- supports named recordings, lap markers, recording playback, raw/CSV downloads, and storage management
+- keeps the live page separate from saved-recording playback
 
 Sender Pi:
 
@@ -81,7 +83,16 @@ Sender Pi:
 - the sender bridge does not change packet meaning
 - to stay within the practical LoRa link budget, the sender bridge keeps only the latest validated packet per telemetry ID and flushes those latest packets on a short interval
 - this is a Phase 3 hardening step and stays within the PRD
-- the receiver dashboard keeps only a small in-memory recent sample window for the selectable live graph and does not persist telemetry history
+- the live dashboard still keeps only a small in-memory recent sample window for the selectable live graph
+- persistent telemetry is written only while an operator-started recording is active
+- recordings are stored on the receiver Pi and can later be replayed through a dashboard page that mirrors the live view
+
+### Dashboard Tabs
+
+- `Live` shows the current receiver telemetry, recording status, live graph, and start/stop/lap controls
+- `Recordings` lists saved recordings and links into the dedicated playback page for each session
+- `Storage` shows total disk space, free space, recording usage, quota, and cleanup controls
+- `Settings` stores recording naming and storage defaults on the receiver Pi
 
 ## Install
 
@@ -249,7 +260,7 @@ In the current bench setup, use `/dev/ttyS0`.
 ```bash
 cd ~/LoRa-Ultimate-Copy
 source .venv/bin/activate
-python3 receiver_app.py --serial-port /dev/ttyS0 --baudrate 9600 --host 0.0.0.0 --port 5000
+python3 receiver_app.py --serial-port /dev/ttyS0 --baudrate 9600 --host 0.0.0.0 --port 5000 --data-dir data
 ```
 
 Then open the dashboard from another device on the same network:
@@ -257,6 +268,8 @@ Then open the dashboard from another device on the same network:
 ```text
 http://<receiver-pi-ip>:5000
 ```
+
+The receiver will create its settings and recordings under the `data/` directory you pass in.
 
 ## Receiver Networking
 
@@ -685,15 +698,19 @@ echook_lora/
   constants.py          Packet constants and telemetry metadata
   protocol.py           Raw packet validation and decode logic
   receiver.py           Receiver-side LoRa UART reader
+  recordings.py         Receiver-side recordings, playback, settings, and storage logic
   sender_bridge.py      Sender-side UART-to-LoRa bridge
   state.py              Latest telemetry store and derived status
-  dashboard.py          Flask dashboard and JSON endpoint
+  dashboard.py          Flask dashboard pages and JSON endpoints
+  templates/            Live dashboard and recording playback templates
 scripts/
   setup.sh              Interactive one-command sender/receiver setup wizard
   install_service.sh    Create a sender or receiver systemd service
   install_receiver_networking.sh  Configure receiver Pi hotspot or direct Ethernet access
   update_lora.sh        Pull latest code, install deps, and restart services
 tests/
+  test_dashboard_api.py Dashboard route smoke tests when Flask is installed
   test_protocol.py      Decoder and packet validation tests
+  test_recordings.py    Recording lifecycle, playback, and storage tests
   test_streams.py       Sender/receiver stream handling tests
 ```

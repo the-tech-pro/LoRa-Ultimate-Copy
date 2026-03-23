@@ -20,6 +20,8 @@ Build a lightweight, reliable local telemetry system that:
 - reuses the eChook's existing UART/Bluetooth data output,
 - sends it over LoRa instead of Bluetooth,
 - displays live vehicle telemetry on a receiver-side dashboard,
+- allows the operator to start and stop named telemetry recordings,
+- supports later playback of those recordings through the same dashboard,
 - stays simple for the first working version and leaves room for later expansion.
 
 ## Core Principle
@@ -35,13 +37,19 @@ The main design principle is simple:
 - Adding timestamps on the receiver side.
 - Displaying live telemetry in a Flask dashboard.
 - Showing at least speed, voltage, current, and temperatures in the dashboard.
+- User-controlled recording sessions stored on the receiver Pi.
+- Naming recordings and marking laps during an active recording.
+- Playing back saved recordings through a dashboard view that mirrors the live dashboard.
+- Showing storage usage and recording management controls in the dashboard.
 
 ## Out of Scope
 - Changing the eChook packet format.
 - Sending commands back to the car.
 - Cloud sync or internet-facing telemetry.
 - Multi-car support.
-- Historical analytics or complex long-term storage in the first version.
+- Always-on background logging when no recording has been started.
+- Complex long-term analytics in the first version.
+- Automatic lap detection.
 - A native mobile app.
 
 ## System Overview
@@ -69,7 +77,11 @@ This is acceptable as a simpler fallback, but it is not the default delivery tar
 - Treat the LoRa link as the wireless replacement for Bluetooth.
 - Use the sender Pi architecture as the default because it gives better control, debugging, and future extensibility.
 - Add timestamps on the receiver because the source packets do not include time data.
-- Keep the first release simple, then add batching, logging, GPS, or extra sensors later if needed.
+- Keep the live dashboard and the recording playback dashboard visually aligned so operators do not need to learn two separate interfaces.
+- Persist telemetry only when the user explicitly starts a recording.
+- Store recordings on the receiver Pi using lightweight append-only raw packet logs plus authoritative receiver timestamps.
+- Keep storage management local to the receiver Pi dashboard with explicit visibility into used and available space.
+- Keep the implementation simple, then add batching, GPS, or extra sensors later if needed.
 
 ## Primary Hardware
 - eChook controller with UART telemetry output using the same format as its Bluetooth output.
@@ -229,31 +241,101 @@ The receiver Raspberry Pi must:
 - add a receive timestamp because eChook packets do not contain one,
 - store the latest value per telemetry identifier,
 - make the latest decoded state available to the Flask dashboard.
+- write persistent recording data only while a recording session is active,
+- store validated raw packets together with the authoritative receiver timestamp,
+- keep incomplete trailing data recoverable after an unexpected stop or power loss.
 
 For the current bench setup, the receiver-side UART comes from the SX1268 HAT mounted on the Raspberry Pi GPIO header.
 
 The receiver timestamp is the authoritative timestamp for the first version of the system.
 
+## Recording Requirements
+- Recording is off by default.
+- A recording starts only when the user explicitly starts it from the live dashboard.
+- A recording stops only when the user explicitly stops it, or when the receiver process exits unexpectedly.
+- Each recording must have:
+  - a unique recording identifier,
+  - a user-visible name,
+  - a start time,
+  - an end time once closed,
+  - packet count and size metadata,
+  - a list of lap markers.
+- The dashboard must allow the user to:
+  - start a recording,
+  - stop a recording,
+  - rename a recording,
+  - add lap markers during an active recording,
+  - download a recording,
+  - delete a recording.
+- Recordings must be stored on the receiver Pi only.
+- The persisted recording format should stay lightweight and should prioritize storing authoritative timestamps plus raw validated packets rather than duplicating large decoded datasets.
+- Continuous always-on persistence outside an active recording is not required.
+
 ## Dashboard Requirements
 The dashboard runs on the receiver Pi and must be implemented in Flask.
 
-### Dashboard must show
+### Dashboard information architecture
+- The dashboard must provide these top-level tabs:
+  - `Live`
+  - `Recordings`
+  - `Storage`
+  - `Settings`
+
+### Live tab must show
 - connection status
 - latest update time / packet age
 - speed
 - voltage
 - current
 - temperatures
+- whether a recording is active
+- the active recording name if recording is active
+- the active recording elapsed time if recording is active
+- a clear `Start Recording` action when idle
+- clear `Stop Recording` and `Lap` actions while recording
+
+### Recordings tab must show
+- a list of saved recordings with name, date, duration, lap count, packet count, and size
+- actions to rename, download, and delete recordings
+- a way to open a dedicated playback page for an individual recording
+
+### Recording playback page requirements
+- Opening a recording must take the user to a page that feels like the live dashboard, but driven by recorded data instead of live telemetry.
+- The playback page must reuse the same key stats, graph area, and telemetry table concepts as the live dashboard.
+- The playback page must support:
+  - play,
+  - pause,
+  - jump to start,
+  - jump to end,
+  - a scrub/timeline control,
+  - playback speed control,
+  - lap markers on the playback timeline.
+
+### Storage tab must show
+- total receiver storage
+- currently available receiver storage
+- total recording storage used
+- recording quota or reserved-space settings
+- cleanup and deletion controls for recordings
+- clear warnings when storage is too low to safely start a new recording
+
+### Settings tab must show
+- recording-related defaults such as naming behavior
+- storage-management settings such as quota and reserved free space
+- any playback defaults that should persist across page loads
 
 ### Dashboard behavior
 - Refresh automatically roughly once per second.
 - Prefer a simple local-web implementation over a complex frontend stack.
 - Be usable on a laptop or phone connected to the receiver Pi's local network.
+- The `Live` tab must always reflect current receiver telemetry rather than playback data.
+- The dashboard must make recording state obvious at a glance.
+- The dashboard must prevent starting a recording if storage conditions are unsafe.
 
-### Initial data model
-The first version only needs to maintain the latest known value for each telemetry field plus its receive timestamp.
-
-Persistent history is not required for the first version.
+### Data model
+- Live state must maintain the latest known value for each telemetry field plus its receive timestamp.
+- Persistent history must exist only for explicit user-started recordings.
+- Recording playback may derive decoded views from stored raw packet records instead of storing a second fully decoded history copy.
 
 ## Networking and Deployment
 - The dashboard is hosted locally on the receiver Raspberry Pi.
@@ -267,13 +349,24 @@ Persistent history is not required for the first version.
 4. The receiver must add timestamps because the source packets do not include time data.
 5. The receiver must decode values consistently with the published eChook Bluetooth/UART encoding rules.
 6. The dashboard must present live telemetry with approximately 1 second refresh behavior.
-7. The first release must prioritize simplicity and reliability over advanced features.
+7. The dashboard must provide `Live`, `Recordings`, `Storage`, and `Settings` tabs.
+8. The system must not persist telemetry unless the user has started a recording.
+9. An active recording must be startable and stoppable from the `Live` tab.
+10. The `Live` tab must clearly indicate when recording is active.
+11. The system must allow recordings to be named and later renamed.
+12. The system must allow lap markers to be added during an active recording.
+13. Saved recordings must be viewable through a playback page that mirrors the live dashboard layout.
+14. The system must allow recordings to be downloaded and deleted from the dashboard.
+15. The dashboard must expose recording-related storage usage and management controls.
+16. The implementation must prioritize simplicity and reliability over unnecessary protocol or storage complexity.
 
 ## Non-Functional Requirements
 - Keep the first implementation lightweight and easy to debug.
 - Preserve the original eChook packet semantics end to end.
 - Minimize custom protocol complexity over the LoRa link in the first version.
-- Make it easy to extend later with batching, GPS, extra sensors, or data logging.
+- Keep recording storage efficient enough for Raspberry Pi systems with limited local storage.
+- Prefer append-only and crash-tolerant recording writes over heavier storage schemes.
+- Make it easy to extend later with batching, GPS, extra sensors, richer analytics, or alternate export formats.
 
 ## Assumptions
 - The eChook UART output used here is the same data stream and packet format as the Bluetooth module output.
@@ -297,23 +390,40 @@ Persistent history is not required for the first version.
 - Forward packets over LoRa.
 - Confirm end-to-end telemetry flow.
 
-### Phase 3: Hardening
-- Improve packet validation and error handling.
+### Phase 3: Dashboard structure
+- Introduce the `Live`, `Recordings`, `Storage`, and `Settings` tab layout.
+- Keep the `Live` tab focused on current telemetry only.
+- Add clear recording controls and recording-state indicators to the `Live` tab.
+
+### Phase 4: Recording and playback
+- Add receiver-side named recordings that store raw packets plus authoritative receiver timestamps.
+- Add lap markers during active recordings.
+- Add a recordings list and a playback page that mirrors the live dashboard experience.
+- Add raw and decoded export paths for saved recordings.
+
+### Phase 5: Storage management and hardening
+- Add storage usage, quota, and cleanup controls.
+- Improve packet validation, crash recovery, and recording-file integrity handling.
 - Add optional batching if it improves radio performance.
 - Add service startup and deployment polish.
 
-### Phase 4: Extensions
+### Phase 6: Extensions
 - Add GPS or additional sender-side sensors.
-- Add optional logging or historical charts.
 - Add more advanced dashboard views if needed.
+- Add richer analytics if later required.
 
 ## Success Criteria
 - Live eChook telemetry reaches the receiver Pi over LoRa.
 - The receiver decodes incoming packets into correct engineering values.
 - The dashboard updates automatically and shows useful live telemetry.
+- The operator can start and stop recordings from the live dashboard without interrupting live telemetry.
+- Saved recordings can be named, reviewed through dashboard playback, downloaded, and deleted.
+- Storage usage is visible and manageable from the dashboard.
 - The implementation works with the existing eChook telemetry format rather than inventing a new one.
 
 ## Open Questions
 - Revalidate that `115200` is the correct UART setting for the final sender-side deployment.
 - Confirm whether the SX1268 pair will stay on `9600` UART permanently or be intentionally reconfigured later.
 - Decide whether batching is needed for the initial deployment or can wait until after the first end-to-end demo.
+- Decide the default recording quota and reserved free-space threshold for a 16 GB Raspberry Pi setup.
+- Decide whether recording playback should decode fully on demand or cache an intermediate playback index.

@@ -1,0 +1,725 @@
+{% extends "base.html" %}
+
+{% block body %}
+  <section class="hero">
+    <article class="hero-copy">
+      <p class="eyebrow">Receiver-side live telemetry and recordings</p>
+      <h1>eChook LoRa Dashboard</h1>
+      <p>Live telemetry stays on the receiver Pi, recordings only start when you ask for them, and saved sessions can be reviewed later from the dashboard.</p>
+    </article>
+    <div class="hero-actions">
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dashboard theme">Dark mode</button>
+    </div>
+  </section>
+
+  <div class="tabs">
+    <button class="tab-button active" type="button" data-tab="live">Live</button>
+    <button class="tab-button" type="button" data-tab="recordings">Recordings</button>
+    <button class="tab-button" type="button" data-tab="storage">Storage</button>
+    <button class="tab-button" type="button" data-tab="settings">Settings</button>
+  </div>
+
+  <div id="global-message" class="panel-card hidden"></div>
+
+  <section id="tab-live" class="tab-panel">
+    <article class="recording-banner">
+      <div class="stack">
+        <p class="section-tag">Recording control</p>
+        <div id="recording-pill" class="recording-pill idle">
+          <span class="dot"></span>
+          <span id="recording-pill-text">Idle</span>
+        </div>
+        <p id="recording-copy" class="muted">No recording is active.</p>
+        <p id="recording-blockers" class="notice hidden"></p>
+      </div>
+      <div class="action-group">
+        <button id="start-recording" class="button primary" type="button">Start Recording</button>
+        <button id="stop-recording" class="button" type="button">Stop Recording</button>
+        <button id="lap-recording" class="button" type="button">Lap</button>
+      </div>
+    </article>
+
+    <section class="status-row">
+      <article class="status-card">
+        <p class="status-label">Connection</p>
+        <div id="status-pill" class="status-pill waiting">
+          <span class="dot"></span>
+          <span id="status-text">Waiting</span>
+        </div>
+      </article>
+      <article class="status-card">
+        <p class="status-label">Last packet</p>
+        <strong id="latest-update" class="status-value">Waiting for packets</strong>
+      </article>
+      <article class="status-card">
+        <p class="status-label">Packet age</p>
+        <strong id="packet-age" class="status-value">Waiting for packets</strong>
+      </article>
+      <article class="status-card">
+        <p class="status-label">Last raw packet</p>
+        <strong id="last-raw-packet" class="status-value mono">n/a</strong>
+      </article>
+    </section>
+
+    <section id="metric-grid" class="metric-grid"></section>
+
+    <section class="chart-card">
+      <div class="chart-toolbar">
+        <div>
+          <p class="section-tag">Live chart</p>
+          <h2 class="chart-title">Selectable telemetry lines</h2>
+          <p class="chart-note">The graph uses the current rolling receiver history so the live page stays fast and simple.</p>
+        </div>
+        <div class="selector-meta">
+          <p>Recent samples: <strong id="history-limit">{{ initial_state.recent_history_limit }}</strong></p>
+        </div>
+      </div>
+
+      <div id="graph-controls" class="selector-list"></div>
+
+      <div class="chart-shell">
+        <div class="chart-frame">
+          <div class="chart-scale">
+            <span id="chart-max">--</span>
+            <span id="chart-min">--</span>
+          </div>
+          <div class="chart-canvas">
+            <svg id="telemetry-chart" class="chart-svg" viewBox="0 0 1000 360" role="img" aria-label="Telemetry chart">
+              <g id="chart-grid"></g>
+              <g id="chart-lines"></g>
+            </svg>
+            <div id="chart-empty" class="chart-empty hidden">Select at least one stat with live samples to draw the chart.</div>
+          </div>
+        </div>
+
+        <div class="chart-footer">
+          <article class="chart-stat">
+            <p class="status-label">Window</p>
+            <strong id="chart-window">Waiting for data</strong>
+          </article>
+          <article class="chart-stat">
+            <p class="status-label">Value range</p>
+            <strong id="chart-range">Waiting for data</strong>
+          </article>
+          <article class="chart-stat">
+            <p class="status-label">Visible lines</p>
+            <strong id="chart-visible">0 selected</strong>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="table-card">
+      <div class="table-top">
+        <div>
+          <p class="section-tag">All telemetry</p>
+          <h2 class="table-title">Latest decoded readings</h2>
+        </div>
+        <p class="table-note">Live readings stay authoritative to the receiver Pi. Recording controls never replace the live feed.</p>
+      </div>
+
+      <div class="table-shell">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Value</th>
+              <th>Units</th>
+              <th>Received</th>
+            </tr>
+          </thead>
+          <tbody id="telemetry-table-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </section>
+
+  <section id="tab-recordings" class="tab-panel hidden">
+    <article class="panel-card">
+      <div class="panel-head">
+        <div>
+          <p class="section-tag">Saved sessions</p>
+          <h2 class="section-title">Recordings</h2>
+          <p class="muted">Open a saved recording to replay it through a dashboard page that behaves like live telemetry.</p>
+        </div>
+        <div class="row-actions">
+          <button id="refresh-recordings" class="button" type="button">Refresh</button>
+        </div>
+      </div>
+
+      <div class="table-shell">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Started</th>
+              <th>Duration</th>
+              <th>Laps</th>
+              <th>Packets</th>
+              <th>Size</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="recordings-table-body"></tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+
+  <section id="tab-storage" class="tab-panel hidden">
+    <article class="panel-card">
+      <div class="panel-head">
+        <div>
+          <p class="section-tag">Receiver Pi storage</p>
+          <h2 class="section-title">Storage</h2>
+          <p class="muted">Recording is blocked automatically if free space drops below the configured reserve or the recording quota is already full.</p>
+        </div>
+        <div class="row-actions">
+          <button id="purge-oldest" class="button" type="button">Purge Oldest</button>
+          <button id="purge-all" class="button danger" type="button">Delete All Closed</button>
+        </div>
+      </div>
+
+      <div class="storage-grid">
+        <article class="storage-card">
+          <p class="status-label">Total Disk</p>
+          <strong id="storage-total" class="storage-value">--</strong>
+        </article>
+        <article class="storage-card">
+          <p class="status-label">Free Disk</p>
+          <strong id="storage-free" class="storage-value">--</strong>
+        </article>
+        <article class="storage-card">
+          <p class="status-label">Recordings Used</p>
+          <strong id="storage-recordings" class="storage-value">--</strong>
+        </article>
+        <article class="storage-card">
+          <p class="status-label">Recording Quota</p>
+          <strong id="storage-quota" class="storage-value">--</strong>
+        </article>
+      </div>
+
+      <div class="recording-banner">
+        <div>
+          <p class="section-tag">Recording safety</p>
+          <p id="storage-status-copy" class="muted">--</p>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <section id="tab-settings" class="tab-panel hidden">
+    <article class="panel-card">
+      <div class="panel-head">
+        <div>
+          <p class="section-tag">Dashboard defaults</p>
+          <h2 class="section-title">Settings</h2>
+          <p class="muted">These settings live on the receiver Pi and apply to future recordings and playback defaults.</p>
+        </div>
+      </div>
+
+      <form id="settings-form" class="stack">
+        <div class="field-grid">
+          <div class="field">
+            <label for="recording-name-prefix">Recording Name Prefix</label>
+            <input id="recording-name-prefix" name="recording_name_prefix" type="text" required>
+          </div>
+          <div class="field">
+            <label for="default-playback-speed">Default Playback Speed</label>
+            <select id="default-playback-speed" name="default_playback_speed">
+              <option value="0.5">0.5x</option>
+              <option value="1" selected>1x</option>
+              <option value="2">2x</option>
+              <option value="4">4x</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="recording-quota-mb">Recording Quota (MB)</label>
+            <input id="recording-quota-mb" name="recording_quota_mb" type="number" min="1" step="1" required>
+          </div>
+          <div class="field">
+            <label for="reserved-free-mb">Reserved Free Space (MB)</label>
+            <input id="reserved-free-mb" name="reserved_free_mb" type="number" min="0" step="1" required>
+          </div>
+        </div>
+        <div class="row-actions">
+          <button class="button primary" type="submit">Save Settings</button>
+        </div>
+      </form>
+    </article>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    const initialState = {{ initial_state|tojson }};
+    const initialRecordings = {{ initial_recordings|tojson }};
+    const initialStorage = {{ initial_storage|tojson }};
+    const initialSettings = {{ initial_settings|tojson }};
+    const graphOptions = {{ graph_options|tojson }};
+    const topMetricIds = {{ top_metric_ids|tojson }};
+    const graphDefaultIds = {{ graph_default_ids|tojson }};
+    const metricStyles = {{ metric_styles|tojson }};
+  </script>
+  <script>
+    const graphOptionMap = Object.fromEntries(graphOptions.map((option) => [option.packet_id, option]));
+    const storageKeys = { theme: "dashboard-theme", series: "dashboard-series", tab: "dashboard-tab" };
+    let currentSnapshot = initialState;
+    let recordingsData = initialRecordings;
+    let storageData = initialStorage;
+    let settingsData = initialSettings;
+    let selectedIds = loadSelectedIds();
+
+    function loadSelectedIds() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(storageKeys.series) || "[]");
+        const validIds = saved.filter((packetId) => graphOptionMap[packetId]);
+        return validIds.length ? validIds : [...graphDefaultIds];
+      } catch (error) {
+        return [...graphDefaultIds];
+      }
+    }
+
+    function saveSelectedIds() {
+      localStorage.setItem(storageKeys.series, JSON.stringify(selectedIds));
+    }
+
+    function showMessage(message, isError = false) {
+      const panel = document.getElementById("global-message");
+      panel.textContent = message;
+      panel.classList.remove("hidden");
+      panel.classList.toggle("notice", isError);
+      window.setTimeout(() => panel.classList.add("hidden"), 3200);
+    }
+
+    function updateThemeButton() {
+      const button = document.getElementById("theme-toggle");
+      button.textContent = document.documentElement.dataset.theme === "dark" ? "Light mode" : "Dark mode";
+    }
+
+    function toggleTheme() {
+      const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+      document.documentElement.dataset.theme = nextTheme;
+      localStorage.setItem(storageKeys.theme, nextTheme);
+      updateThemeButton();
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function readingFor(packetId) {
+      return currentSnapshot.all_readings[packetId] || null;
+    }
+
+    function renderStatus() {
+      const pill = document.getElementById("status-pill");
+      pill.classList.remove("connected", "waiting");
+      pill.classList.add(currentSnapshot.connection_status);
+      document.getElementById("status-text").textContent = currentSnapshot.connection_status.charAt(0).toUpperCase() + currentSnapshot.connection_status.slice(1);
+      document.getElementById("latest-update").textContent = currentSnapshot.latest_update_display || "Waiting for packets";
+      document.getElementById("packet-age").textContent = currentSnapshot.packet_age_display || "Waiting for packets";
+      document.getElementById("last-raw-packet").textContent = currentSnapshot.last_raw_packet_hex || "n/a";
+      document.getElementById("history-limit").textContent = currentSnapshot.recent_history_limit;
+    }
+
+    function renderRecordingStatus() {
+      const status = currentSnapshot.recording_status || { is_recording: false, start_blockers: [] };
+      const pill = document.getElementById("recording-pill");
+      const copy = document.getElementById("recording-copy");
+      const blockers = document.getElementById("recording-blockers");
+      const startButton = document.getElementById("start-recording");
+      const stopButton = document.getElementById("stop-recording");
+      const lapButton = document.getElementById("lap-recording");
+
+      pill.classList.toggle("active", Boolean(status.is_recording));
+      pill.classList.toggle("idle", !status.is_recording);
+      document.getElementById("recording-pill-text").textContent = status.is_recording ? "Recording" : "Idle";
+
+      if (status.is_recording && status.active_recording) {
+        const active = status.active_recording;
+        copy.textContent = `${active.name} • ${active.elapsed_display} • ${active.packet_count} packets • ${active.lap_count} laps`;
+      } else {
+        copy.textContent = "No recording is active.";
+      }
+
+      if (!status.is_recording && status.start_blockers && status.start_blockers.length) {
+        blockers.textContent = status.start_blockers.join(" ");
+        blockers.classList.remove("hidden");
+      } else {
+        blockers.classList.add("hidden");
+      }
+
+      startButton.disabled = status.is_recording || !status.can_start_recording;
+      stopButton.disabled = !status.is_recording;
+      lapButton.disabled = !status.is_recording;
+    }
+
+    function renderMetricCards() {
+      const container = document.getElementById("metric-grid");
+      container.innerHTML = topMetricIds.map((packetId) => {
+        const reading = readingFor(packetId);
+        const style = metricStyles[packetId] || { label: packetId, glow: "rgba(59, 130, 246, 0.18)" };
+        const unit = reading && reading.units_display ? reading.units_display : "";
+        const value = reading ? reading.value_display : "--";
+        const meta = reading ? "Updated " + reading.received_at_display : "Waiting for packets";
+        const name = style.label || packetId;
+        return `
+          <article class="metric-card" style="--metric-glow: ${style.glow};">
+            <div class="metric-head">
+              <p class="metric-label">${escapeHtml(name)}</p>
+              <p class="metric-label mono">${escapeHtml(packetId)}</p>
+            </div>
+            <div class="metric-number-row">
+              <p class="metric-number">${escapeHtml(value)}</p>
+              ${unit ? `<span class="metric-unit">${escapeHtml(unit)}</span>` : ""}
+            </div>
+            <p class="metric-updated">${escapeHtml(meta)}</p>
+          </article>
+        `;
+      }).join("");
+    }
+
+    function renderGraphControls() {
+      const container = document.getElementById("graph-controls");
+      container.innerHTML = graphOptions.map((option) => {
+        const reading = readingFor(option.packet_id);
+        const value = reading ? `${reading.value_display}${reading.units_display ? ` ${reading.units_display}` : ""}` : "No data";
+        const active = selectedIds.includes(option.packet_id) ? "active" : "";
+        return `
+          <button type="button" class="selector-chip ${active}" data-packet-id="${escapeHtml(option.packet_id)}" aria-pressed="${active ? "true" : "false"}">
+            <span class="selector-swatch" style="background: ${option.color};"></span>
+            <span class="selector-label">${escapeHtml(option.label)}</span>
+            <span class="selector-value">${escapeHtml(value)}</span>
+          </button>
+        `;
+      }).join("");
+    }
+
+    function buildGridMarkup(width, height, padding) {
+      const lines = [];
+      const usableHeight = height - (padding * 2);
+      for (let index = 0; index <= 4; index += 1) {
+        const y = padding + ((usableHeight / 4) * index);
+        lines.push(`<line class="chart-grid-line" x1="${padding}" y1="${y.toFixed(2)}" x2="${(width - padding).toFixed(2)}" y2="${y.toFixed(2)}"></line>`);
+      }
+      lines.push(`<line class="chart-axis-line" x1="${padding}" y1="${(height - padding).toFixed(2)}" x2="${(width - padding).toFixed(2)}" y2="${(height - padding).toFixed(2)}"></line>`);
+      return lines.join("");
+    }
+
+    function renderChart() {
+      const width = 1000;
+      const height = 360;
+      const padding = 24;
+      const chartGrid = document.getElementById("chart-grid");
+      const chartLines = document.getElementById("chart-lines");
+      const chartEmpty = document.getElementById("chart-empty");
+      chartGrid.innerHTML = buildGridMarkup(width, height, padding);
+
+      const selectedSeries = selectedIds
+        .map((packetId) => ({ packetId, option: graphOptionMap[packetId], history: currentSnapshot.recent_history[packetId] || [] }))
+        .filter((series) => series.option);
+      const liveSeries = selectedSeries.filter((series) => series.history.length > 0);
+      if (!liveSeries.length) {
+        chartLines.innerHTML = "";
+        chartEmpty.classList.remove("hidden");
+        document.getElementById("chart-max").textContent = "--";
+        document.getElementById("chart-min").textContent = "--";
+        document.getElementById("chart-window").textContent = "Waiting for data";
+        document.getElementById("chart-range").textContent = "Waiting for data";
+        document.getElementById("chart-visible").textContent = `${selectedIds.length} selected`;
+        return;
+      }
+
+      const allPoints = liveSeries.flatMap((series) => series.history.map((point) => ({ timestamp: Date.parse(point.received_at), value: Number(point.value) })));
+      let minTime = Math.min(...allPoints.map((point) => point.timestamp));
+      let maxTime = Math.max(...allPoints.map((point) => point.timestamp));
+      let minValue = Math.min(...allPoints.map((point) => point.value));
+      let maxValue = Math.max(...allPoints.map((point) => point.value));
+      if (minTime === maxTime) { minTime -= 1000; maxTime += 1000; }
+      if (minValue === maxValue) {
+        const pad = Math.max(Math.abs(minValue) * 0.08, 1);
+        minValue -= pad;
+        maxValue += pad;
+      }
+
+      const usableWidth = width - (padding * 2);
+      const usableHeight = height - (padding * 2);
+      const xFor = (timestamp) => padding + (((timestamp - minTime) / (maxTime - minTime)) * usableWidth);
+      const yFor = (value) => height - padding - (((value - minValue) / (maxValue - minValue)) * usableHeight);
+
+      chartLines.innerHTML = liveSeries.map((series) => {
+        const points = series.history.map((point) => ({ x: xFor(Date.parse(point.received_at)), y: yFor(Number(point.value)) }));
+        const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
+        const lastPoint = points[points.length - 1];
+        return `
+          <path class="chart-path" d="${path}" style="stroke: ${series.option.color};"></path>
+          <circle class="chart-endpoint" cx="${lastPoint.x.toFixed(2)}" cy="${lastPoint.y.toFixed(2)}" r="4.8" fill="${series.option.color}"></circle>
+        `;
+      }).join("");
+
+      chartEmpty.classList.add("hidden");
+      const windowStart = new Date(minTime);
+      const windowEnd = new Date(maxTime);
+      document.getElementById("chart-max").textContent = maxValue.toFixed(2).replace(/\.00$/, "");
+      document.getElementById("chart-min").textContent = minValue.toFixed(2).replace(/\.00$/, "");
+      document.getElementById("chart-window").textContent = `${windowStart.toISOString().slice(11, 19)} UTC to ${windowEnd.toISOString().slice(11, 19)} UTC`;
+      document.getElementById("chart-range").textContent = `${minValue.toFixed(2)} to ${maxValue.toFixed(2)}`;
+      document.getElementById("chart-visible").textContent = `${liveSeries.length} visible • ${selectedIds.length} selected`;
+    }
+
+    function renderTable() {
+      const tableBody = document.getElementById("telemetry-table-body");
+      const readings = Object.values(currentSnapshot.all_readings);
+      if (!readings.length) {
+        tableBody.innerHTML = '<tr><td colspan="5">Waiting for telemetry packets on the LoRa UART.</td></tr>';
+        return;
+      }
+      tableBody.innerHTML = readings.map((reading) => `
+        <tr>
+          <td class="table-strong mono">${escapeHtml(reading.packet_id)}</td>
+          <td>${escapeHtml(reading.name_display)}</td>
+          <td class="table-strong">${escapeHtml(reading.value_display)}</td>
+          <td>${escapeHtml(reading.units_display || "-")}</td>
+          <td>${escapeHtml(reading.received_at_display)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderRecordings() {
+      const body = document.getElementById("recordings-table-body");
+      const recordings = recordingsData.recordings || [];
+      if (!recordings.length) {
+        body.innerHTML = '<tr><td colspan="7">No recordings saved yet.</td></tr>';
+        return;
+      }
+      body.innerHTML = recordings.map((recording) => `
+        <tr>
+          <td class="table-strong">${escapeHtml(recording.name)}</td>
+          <td>${escapeHtml(recording.started_at_display)}</td>
+          <td>${escapeHtml(recording.duration_display)}</td>
+          <td>${escapeHtml(String(recording.lap_count))}</td>
+          <td>${escapeHtml(String(recording.packet_count))}</td>
+          <td>${escapeHtml(recording.size_display)}</td>
+          <td>
+            <div class="row-actions">
+              ${recording.is_active ? '' : `<a class="button" href="${recording.playback_url}">Open</a>`}
+              <button class="button" type="button" data-action="rename" data-recording-id="${recording.recording_id}">Rename</button>
+              <a class="button" href="${recording.download_raw_url}">Raw</a>
+              <a class="button" href="${recording.download_csv_url}">CSV</a>
+              <button class="button danger" type="button" data-action="delete" data-recording-id="${recording.recording_id}">Delete</button>
+            </div>
+          </td>
+        </tr>
+      `).join("");
+    }
+
+    function renderStorage() {
+      document.getElementById("storage-total").textContent = storageData.total_display;
+      document.getElementById("storage-free").textContent = storageData.free_display;
+      document.getElementById("storage-recordings").textContent = storageData.recordings_display;
+      document.getElementById("storage-quota").textContent = storageData.recording_quota_display;
+      const blockers = storageData.start_blockers || [];
+      document.getElementById("storage-status-copy").textContent = blockers.length
+        ? blockers.join(" ")
+        : `Recording can start. ${storageData.recording_count} recording(s) are stored on this receiver.`;
+    }
+
+    function renderSettings() {
+      document.getElementById("recording-name-prefix").value = settingsData.recording_name_prefix || "Recording";
+      document.getElementById("recording-quota-mb").value = Math.round((settingsData.recording_quota_bytes || 0) / (1024 * 1024));
+      document.getElementById("reserved-free-mb").value = Math.round((settingsData.reserved_free_bytes || 0) / (1024 * 1024));
+      document.getElementById("default-playback-speed").value = String(settingsData.default_playback_speed || 1);
+    }
+
+    function renderAll() {
+      renderStatus();
+      renderRecordingStatus();
+      renderMetricCards();
+      renderGraphControls();
+      renderChart();
+      renderTable();
+      renderRecordings();
+      renderStorage();
+      renderSettings();
+      updateThemeButton();
+    }
+
+    async function fetchJson(url, options = {}) {
+      const response = await fetch(url, { headers: { "Content-Type": "application/json" }, cache: "no-store", ...options });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || "Request failed.");
+      }
+      return payload;
+    }
+
+    async function refreshAllData() {
+      try {
+        const [statePayload, recordingsPayload, storagePayload, settingsPayload] = await Promise.all([
+          fetchJson("/api/state"),
+          fetchJson("/api/recordings"),
+          fetchJson("/api/storage"),
+          fetchJson("/api/settings"),
+        ]);
+        currentSnapshot = statePayload;
+        recordingsData = recordingsPayload;
+        storageData = storagePayload;
+        settingsData = settingsPayload;
+        renderAll();
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    }
+
+    async function refreshLiveState() {
+      try {
+        currentSnapshot = await fetchJson("/api/state");
+        renderStatus();
+        renderRecordingStatus();
+        renderMetricCards();
+        renderGraphControls();
+        renderChart();
+        renderTable();
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    }
+
+    function activateTab(tabName) {
+      localStorage.setItem(storageKeys.tab, tabName);
+      document.querySelectorAll(".tab-button").forEach((button) => {
+        button.classList.toggle("active", button.dataset.tab === tabName);
+      });
+      document.querySelectorAll(".tab-panel").forEach((panel) => {
+        panel.classList.toggle("hidden", panel.id !== `tab-${tabName}`);
+      });
+    }
+
+    document.getElementById("theme-toggle").addEventListener("click", toggleTheme);
+    document.querySelector(".tabs").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-tab]");
+      if (button) {
+        activateTab(button.dataset.tab);
+      }
+    });
+    document.getElementById("graph-controls").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-packet-id]");
+      if (!button) { return; }
+      const packetId = button.getAttribute("data-packet-id");
+      if (selectedIds.includes(packetId)) {
+        selectedIds = selectedIds.filter((value) => value !== packetId);
+      } else {
+        selectedIds = [...selectedIds, packetId];
+      }
+      saveSelectedIds();
+      renderAll();
+    });
+
+    document.getElementById("start-recording").addEventListener("click", async () => {
+      const name = window.prompt("Recording name (leave blank for default):", "");
+      if (name === null) { return; }
+      try {
+        await fetchJson("/api/recordings/start", { method: "POST", body: JSON.stringify({ name }) });
+        await refreshAllData();
+        showMessage("Recording started.");
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    });
+
+    document.getElementById("stop-recording").addEventListener("click", async () => {
+      try {
+        await fetchJson("/api/recordings/stop", { method: "POST" });
+        await refreshAllData();
+        showMessage("Recording stopped.");
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    });
+
+    document.getElementById("lap-recording").addEventListener("click", async () => {
+      const label = window.prompt("Lap label (leave blank for automatic numbering):", "");
+      if (label === null) { return; }
+      try {
+        await fetchJson("/api/recordings/active/lap", { method: "POST", body: JSON.stringify({ label }) });
+        await refreshAllData();
+        showMessage("Lap added.");
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    });
+
+    document.getElementById("refresh-recordings").addEventListener("click", refreshAllData);
+    document.getElementById("recordings-table-body").addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-action]");
+      if (!button) { return; }
+      const recordingId = button.dataset.recordingId;
+      try {
+        if (button.dataset.action === "rename") {
+          const name = window.prompt("New recording name:", "");
+          if (name === null) { return; }
+          await fetchJson(`/api/recordings/${recordingId}/rename`, { method: "POST", body: JSON.stringify({ name }) });
+          showMessage("Recording renamed.");
+        }
+        if (button.dataset.action === "delete") {
+          if (!window.confirm("Delete this recording?")) { return; }
+          await fetchJson(`/api/recordings/${recordingId}`, { method: "DELETE" });
+          showMessage("Recording deleted.");
+        }
+        await refreshAllData();
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    });
+
+    document.getElementById("purge-oldest").addEventListener("click", async () => {
+      try {
+        await fetchJson("/api/storage/purge", { method: "POST", body: JSON.stringify({ mode: "quota" }) });
+        await refreshAllData();
+        showMessage("Oldest recordings purged until the quota is satisfied.");
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    });
+
+    document.getElementById("purge-all").addEventListener("click", async () => {
+      if (!window.confirm("Delete all closed recordings?")) { return; }
+      try {
+        await fetchJson("/api/storage/purge", { method: "POST", body: JSON.stringify({ mode: "all" }) });
+        await refreshAllData();
+        showMessage("Closed recordings deleted.");
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    });
+
+    document.getElementById("settings-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const payload = {
+        recording_name_prefix: document.getElementById("recording-name-prefix").value,
+        recording_quota_bytes: Math.round(Number(document.getElementById("recording-quota-mb").value) * 1024 * 1024),
+        reserved_free_bytes: Math.round(Number(document.getElementById("reserved-free-mb").value) * 1024 * 1024),
+        default_playback_speed: Number(document.getElementById("default-playback-speed").value),
+      };
+      try {
+        settingsData = await fetchJson("/api/settings", { method: "POST", body: JSON.stringify(payload) });
+        await refreshAllData();
+        showMessage("Settings saved.");
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    });
+
+    renderAll();
+    activateTab(localStorage.getItem(storageKeys.tab) || "live");
+    window.setInterval(refreshLiveState, 1000);
+    window.setInterval(refreshAllData, 10000);
+  </script>
+{% endblock %}

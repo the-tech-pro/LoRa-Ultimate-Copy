@@ -6,11 +6,12 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import Event, Thread
+from typing import Callable
 
 import serial
 
 from .constants import DEFAULT_SERIAL_RETRY_DELAY_SECONDS, END_BYTE, PACKET_SIZE, START_BYTE
-from .protocol import PacketError, decode_packet
+from .protocol import DecodedPacket, PacketError, decode_packet
 from .state import TelemetryStore
 
 LOGGER = logging.getLogger(__name__)
@@ -27,9 +28,15 @@ class ReceiverConfig:
 class LoRaReceiver:
     """Read LoRa UART bytes, recover packets, and update receiver state."""
 
-    def __init__(self, config: ReceiverConfig, store: TelemetryStore) -> None:
+    def __init__(
+        self,
+        config: ReceiverConfig,
+        store: TelemetryStore,
+        packet_handler: Callable[[DecodedPacket], None] | None = None,
+    ) -> None:
         self._config = config
         self._store = store
+        self._packet_handler = packet_handler
         self._stop_event = Event()
         self._thread: Thread | None = None
 
@@ -106,4 +113,9 @@ class LoRaReceiver:
                 continue
 
             self._store.update(packet)
+            if self._packet_handler is not None:
+                try:
+                    self._packet_handler(packet)
+                except Exception:  # pragma: no cover - defensive logging path
+                    LOGGER.exception("Packet handler failed for packet %s", candidate.hex(" "))
             del buffer[:PACKET_SIZE]

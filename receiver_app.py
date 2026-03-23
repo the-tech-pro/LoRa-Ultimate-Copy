@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from pathlib import Path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -16,6 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default="0.0.0.0", help="Flask bind host")
     parser.add_argument("--port", type=int, default=5000, help="Flask bind port")
     parser.add_argument("--debug", action="store_true", help="Enable Flask debug mode")
+    parser.add_argument("--data-dir", default="data", help="Receiver dashboard data directory")
     return parser
 
 
@@ -25,6 +27,7 @@ def main() -> None:
 
     try:
         from echook_lora.dashboard import create_app
+        from echook_lora.recordings import RecordingManager
         from echook_lora.receiver import LoRaReceiver, ReceiverConfig
         from echook_lora.state import TelemetryStore
     except ImportError as exc:
@@ -40,13 +43,15 @@ def main() -> None:
     )
 
     store = TelemetryStore()
+    recordings = RecordingManager(Path(args.data_dir))
     receiver = LoRaReceiver(
         ReceiverConfig(serial_port=args.serial_port, baudrate=args.baudrate),
         store,
+        packet_handler=recordings.record_packet,
     )
     receiver.start()
 
-    app = create_app(store)
+    app = create_app(store, recordings)
     app.run(host=args.host, port=args.port, debug=args.debug, use_reloader=False)
 
 

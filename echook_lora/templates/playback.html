@@ -1,0 +1,426 @@
+{% extends "base.html" %}
+
+{% block title %}Recording Playback{% endblock %}
+
+{% block body %}
+  <section class="hero">
+    <article class="hero-copy">
+      <p class="eyebrow">Saved recording playback</p>
+      <h1>{{ playback_manifest.name }}</h1>
+      <p>Playback reuses the live dashboard layout, but the state is driven by a recorded timeline from the receiver Pi instead of the current LoRa feed.</p>
+      <p class="muted"><a href="/">Back to live dashboard</a></p>
+    </article>
+    <div class="hero-actions">
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dashboard theme">Dark mode</button>
+    </div>
+  </section>
+
+  <article class="recording-banner">
+    <div class="stack">
+      <p class="section-tag">Playback</p>
+      <p id="playback-copy" class="playback-copy">Paused.</p>
+      <p id="cursor-display" class="muted">{{ initial_playback.cursor_display or "No data" }}</p>
+    </div>
+    <div class="action-group">
+      <button id="playback-toggle" class="button primary" type="button">Play</button>
+      <button id="jump-start" class="button" type="button">Start</button>
+      <button id="jump-end" class="button" type="button">End</button>
+      <select id="playback-speed">
+        <option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option>
+        <option value="2">2x</option>
+        <option value="4">4x</option>
+      </select>
+    </div>
+  </article>
+
+  <section class="panel-card">
+    <div class="stack">
+      <label for="playback-slider">Timeline</label>
+      <input id="playback-slider" class="timeline" type="range" min="0" max="0" value="0" step="1000">
+      <div id="lap-list" class="lap-list"></div>
+    </div>
+  </section>
+
+  <section class="status-row">
+    <article class="status-card">
+      <p class="status-label">Playback Status</p>
+      <div id="status-pill" class="status-pill connected">
+        <span class="dot"></span>
+        <span id="status-text">Playback</span>
+      </div>
+    </article>
+    <article class="status-card">
+      <p class="status-label">Frame Time</p>
+      <strong id="latest-update" class="status-value">{{ initial_playback.latest_update_display }}</strong>
+    </article>
+    <article class="status-card">
+      <p class="status-label">Frame Age</p>
+      <strong id="packet-age" class="status-value">{{ initial_playback.packet_age_display }}</strong>
+    </article>
+    <article class="status-card">
+      <p class="status-label">Last raw packet</p>
+      <strong id="last-raw-packet" class="status-value mono">{{ initial_playback.last_raw_packet_hex or "n/a" }}</strong>
+    </article>
+  </section>
+
+  <section id="metric-grid" class="metric-grid"></section>
+
+  <section class="chart-card">
+    <div class="chart-toolbar">
+      <div>
+        <p class="section-tag">Playback chart</p>
+        <h2 class="chart-title">Recorded telemetry lines</h2>
+        <p class="chart-note">The chart window follows the playback cursor using the recording's sampled timeline.</p>
+      </div>
+      <div class="selector-meta">
+        <p>Recent samples: <strong id="history-limit">{{ initial_playback.recent_history_limit }}</strong></p>
+      </div>
+    </div>
+    <div id="graph-controls" class="selector-list"></div>
+    <div class="chart-shell">
+      <div class="chart-frame">
+        <div class="chart-scale">
+          <span id="chart-max">--</span>
+          <span id="chart-min">--</span>
+        </div>
+        <div class="chart-canvas">
+          <svg id="telemetry-chart" class="chart-svg" viewBox="0 0 1000 360" role="img" aria-label="Playback chart">
+            <g id="chart-grid"></g>
+            <g id="chart-lines"></g>
+          </svg>
+          <div id="chart-empty" class="chart-empty hidden">Select at least one stat with playback samples to draw the chart.</div>
+        </div>
+      </div>
+      <div class="chart-footer">
+        <article class="chart-stat">
+          <p class="status-label">Window</p>
+          <strong id="chart-window">Waiting for data</strong>
+        </article>
+        <article class="chart-stat">
+          <p class="status-label">Value range</p>
+          <strong id="chart-range">Waiting for data</strong>
+        </article>
+        <article class="chart-stat">
+          <p class="status-label">Visible lines</p>
+          <strong id="chart-visible">0 selected</strong>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="table-card">
+    <div class="table-top">
+      <div>
+        <p class="section-tag">Recorded telemetry</p>
+        <h2 class="table-title">Decoded values at cursor</h2>
+      </div>
+      <p class="table-note">This page reconstructs dashboard state from recorded packets rather than from the current live receiver state.</p>
+    </div>
+    <div class="table-shell">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Value</th>
+            <th>Units</th>
+            <th>Received</th>
+          </tr>
+        </thead>
+        <tbody id="telemetry-table-body"></tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    const initialPlayback = {{ initial_playback|tojson }};
+    const playbackManifest = {{ playback_manifest|tojson }};
+    const graphOptions = {{ graph_options|tojson }};
+    const topMetricIds = {{ top_metric_ids|tojson }};
+    const graphDefaultIds = {{ graph_default_ids|tojson }};
+    const metricStyles = {{ metric_styles|tojson }};
+  </script>
+  <script>
+    const graphOptionMap = Object.fromEntries(graphOptions.map((option) => [option.packet_id, option]));
+    const storageKeys = { theme: "dashboard-theme", series: "playback-series" };
+    let currentSnapshot = initialPlayback;
+    let selectedIds = loadSelectedIds();
+    let isPlaying = false;
+    let playbackTimer = null;
+
+    function loadSelectedIds() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(storageKeys.series) || "[]");
+        const validIds = saved.filter((packetId) => graphOptionMap[packetId]);
+        return validIds.length ? validIds : [...graphDefaultIds];
+      } catch (error) {
+        return [...graphDefaultIds];
+      }
+    }
+
+    function saveSelectedIds() {
+      localStorage.setItem(storageKeys.series, JSON.stringify(selectedIds));
+    }
+
+    function updateThemeButton() {
+      const button = document.getElementById("theme-toggle");
+      button.textContent = document.documentElement.dataset.theme === "dark" ? "Light mode" : "Dark mode";
+    }
+
+    function toggleTheme() {
+      const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+      document.documentElement.dataset.theme = nextTheme;
+      localStorage.setItem(storageKeys.theme, nextTheme);
+      updateThemeButton();
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function readingFor(packetId) {
+      return currentSnapshot.all_readings[packetId] || null;
+    }
+
+    function renderStatus() {
+      document.getElementById("latest-update").textContent = currentSnapshot.latest_update_display || "Waiting for packets";
+      document.getElementById("packet-age").textContent = currentSnapshot.packet_age_display || "Waiting for packets";
+      document.getElementById("last-raw-packet").textContent = currentSnapshot.last_raw_packet_hex || "n/a";
+      document.getElementById("history-limit").textContent = currentSnapshot.recent_history_limit;
+      document.getElementById("cursor-display").textContent = currentSnapshot.cursor_display || "No data";
+      document.getElementById("playback-copy").textContent = isPlaying ? "Playing." : "Paused.";
+      document.getElementById("playback-toggle").textContent = isPlaying ? "Pause" : "Play";
+    }
+
+    function renderMetricCards() {
+      const container = document.getElementById("metric-grid");
+      container.innerHTML = topMetricIds.map((packetId) => {
+        const reading = readingFor(packetId);
+        const style = metricStyles[packetId] || { label: packetId, glow: "rgba(59, 130, 246, 0.18)" };
+        const unit = reading && reading.units_display ? reading.units_display : "";
+        const value = reading ? reading.value_display : "--";
+        const meta = reading ? "Updated " + reading.received_at_display : "Waiting for packets";
+        const name = style.label || packetId;
+        return `
+          <article class="metric-card" style="--metric-glow: ${style.glow};">
+            <div class="metric-head">
+              <p class="metric-label">${escapeHtml(name)}</p>
+              <p class="metric-label mono">${escapeHtml(packetId)}</p>
+            </div>
+            <div class="metric-number-row">
+              <p class="metric-number">${escapeHtml(value)}</p>
+              ${unit ? `<span class="metric-unit">${escapeHtml(unit)}</span>` : ""}
+            </div>
+            <p class="metric-updated">${escapeHtml(meta)}</p>
+          </article>
+        `;
+      }).join("");
+    }
+
+    function renderGraphControls() {
+      const container = document.getElementById("graph-controls");
+      container.innerHTML = graphOptions.map((option) => {
+        const reading = readingFor(option.packet_id);
+        const value = reading ? `${reading.value_display}${reading.units_display ? ` ${reading.units_display}` : ""}` : "No data";
+        const active = selectedIds.includes(option.packet_id) ? "active" : "";
+        return `
+          <button type="button" class="selector-chip ${active}" data-packet-id="${escapeHtml(option.packet_id)}" aria-pressed="${active ? "true" : "false"}">
+            <span class="selector-swatch" style="background: ${option.color};"></span>
+            <span class="selector-label">${escapeHtml(option.label)}</span>
+            <span class="selector-value">${escapeHtml(value)}</span>
+          </button>
+        `;
+      }).join("");
+    }
+
+    function buildGridMarkup(width, height, padding) {
+      const lines = [];
+      const usableHeight = height - (padding * 2);
+      for (let index = 0; index <= 4; index += 1) {
+        const y = padding + ((usableHeight / 4) * index);
+        lines.push(`<line class="chart-grid-line" x1="${padding}" y1="${y.toFixed(2)}" x2="${(width - padding).toFixed(2)}" y2="${y.toFixed(2)}"></line>`);
+      }
+      lines.push(`<line class="chart-axis-line" x1="${padding}" y1="${(height - padding).toFixed(2)}" x2="${(width - padding).toFixed(2)}" y2="${(height - padding).toFixed(2)}"></line>`);
+      return lines.join("");
+    }
+
+    function renderChart() {
+      const width = 1000;
+      const height = 360;
+      const padding = 24;
+      const chartGrid = document.getElementById("chart-grid");
+      const chartLines = document.getElementById("chart-lines");
+      const chartEmpty = document.getElementById("chart-empty");
+      chartGrid.innerHTML = buildGridMarkup(width, height, padding);
+
+      const selectedSeries = selectedIds.map((packetId) => ({ packetId, option: graphOptionMap[packetId], history: currentSnapshot.recent_history[packetId] || [] })).filter((series) => series.option);
+      const liveSeries = selectedSeries.filter((series) => series.history.length > 0);
+      if (!liveSeries.length) {
+        chartLines.innerHTML = "";
+        chartEmpty.classList.remove("hidden");
+        document.getElementById("chart-max").textContent = "--";
+        document.getElementById("chart-min").textContent = "--";
+        document.getElementById("chart-window").textContent = "Waiting for data";
+        document.getElementById("chart-range").textContent = "Waiting for data";
+        document.getElementById("chart-visible").textContent = `${selectedIds.length} selected`;
+        return;
+      }
+
+      const allPoints = liveSeries.flatMap((series) => series.history.map((point) => ({ timestamp: Date.parse(point.received_at), value: Number(point.value) })));
+      let minTime = Math.min(...allPoints.map((point) => point.timestamp));
+      let maxTime = Math.max(...allPoints.map((point) => point.timestamp));
+      let minValue = Math.min(...allPoints.map((point) => point.value));
+      let maxValue = Math.max(...allPoints.map((point) => point.value));
+      if (minTime === maxTime) { minTime -= 1000; maxTime += 1000; }
+      if (minValue === maxValue) {
+        const pad = Math.max(Math.abs(minValue) * 0.08, 1);
+        minValue -= pad;
+        maxValue += pad;
+      }
+
+      const usableWidth = width - (padding * 2);
+      const usableHeight = height - (padding * 2);
+      const xFor = (timestamp) => padding + (((timestamp - minTime) / (maxTime - minTime)) * usableWidth);
+      const yFor = (value) => height - padding - (((value - minValue) / (maxValue - minValue)) * usableHeight);
+      chartLines.innerHTML = liveSeries.map((series) => {
+        const points = series.history.map((point) => ({ x: xFor(Date.parse(point.received_at)), y: yFor(Number(point.value)) }));
+        const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
+        const lastPoint = points[points.length - 1];
+        return `<path class="chart-path" d="${path}" style="stroke: ${series.option.color};"></path><circle class="chart-endpoint" cx="${lastPoint.x.toFixed(2)}" cy="${lastPoint.y.toFixed(2)}" r="4.8" fill="${series.option.color}"></circle>`;
+      }).join("");
+      chartEmpty.classList.add("hidden");
+      const windowStart = new Date(minTime);
+      const windowEnd = new Date(maxTime);
+      document.getElementById("chart-max").textContent = maxValue.toFixed(2).replace(/\.00$/, "");
+      document.getElementById("chart-min").textContent = minValue.toFixed(2).replace(/\.00$/, "");
+      document.getElementById("chart-window").textContent = `${windowStart.toISOString().slice(11, 19)} UTC to ${windowEnd.toISOString().slice(11, 19)} UTC`;
+      document.getElementById("chart-range").textContent = `${minValue.toFixed(2)} to ${maxValue.toFixed(2)}`;
+      document.getElementById("chart-visible").textContent = `${liveSeries.length} visible • ${selectedIds.length} selected`;
+    }
+
+    function renderTable() {
+      const tableBody = document.getElementById("telemetry-table-body");
+      const readings = Object.values(currentSnapshot.all_readings);
+      if (!readings.length) {
+        tableBody.innerHTML = '<tr><td colspan="5">No playback data is available for this cursor position.</td></tr>';
+        return;
+      }
+      tableBody.innerHTML = readings.map((reading) => `
+        <tr>
+          <td class="table-strong mono">${escapeHtml(reading.packet_id)}</td>
+          <td>${escapeHtml(reading.name_display)}</td>
+          <td class="table-strong">${escapeHtml(reading.value_display)}</td>
+          <td>${escapeHtml(reading.units_display || "-")}</td>
+          <td>${escapeHtml(reading.received_at_display)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderLaps() {
+      const container = document.getElementById("lap-list");
+      const firstCursor = playbackManifest.first_cursor_ms || 0;
+      const laps = playbackManifest.laps || [];
+      if (!laps.length) {
+        container.innerHTML = '<span class="muted">No lap markers were saved for this recording.</span>';
+        return;
+      }
+      container.innerHTML = laps.map((lap) => `<button class="button" type="button" data-lap-offset="${lap.offset_ms}">${escapeHtml(lap.label)} • ${escapeHtml(lap.offset_display)}</button>`).join("");
+      container.querySelectorAll("[data-lap-offset]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const offset = Number(button.getAttribute("data-lap-offset"));
+          seekTo(firstCursor + offset);
+        });
+      });
+    }
+
+    function renderSlider() {
+      const slider = document.getElementById("playback-slider");
+      const firstCursor = playbackManifest.first_cursor_ms || 0;
+      const duration = playbackManifest.duration_ms || 0;
+      slider.max = String(duration);
+      slider.value = String(Math.max((currentSnapshot.cursor_ms || firstCursor) - firstCursor, 0));
+    }
+
+    function renderAll() {
+      renderStatus();
+      renderMetricCards();
+      renderGraphControls();
+      renderChart();
+      renderTable();
+      renderLaps();
+      renderSlider();
+      updateThemeButton();
+    }
+
+    async function fetchState(cursorMs) {
+      const response = await fetch(`/api/recordings/${playbackManifest.recording_id}/state?cursor_ms=${cursorMs}`, { cache: "no-store" });
+      currentSnapshot = await response.json();
+      renderAll();
+    }
+
+    async function seekTo(cursorMs) {
+      await fetchState(cursorMs);
+    }
+
+    function stopPlayback() {
+      isPlaying = false;
+      if (playbackTimer) {
+        window.clearInterval(playbackTimer);
+        playbackTimer = null;
+      }
+      renderStatus();
+    }
+
+    function startPlayback() {
+      stopPlayback();
+      isPlaying = true;
+      renderStatus();
+      playbackTimer = window.setInterval(async () => {
+        const speed = Number(document.getElementById("playback-speed").value || "1");
+        const nextCursor = Math.min((currentSnapshot.cursor_ms || playbackManifest.first_cursor_ms || 0) + (1000 * speed), playbackManifest.last_cursor_ms || 0);
+        await seekTo(nextCursor);
+        if (nextCursor >= (playbackManifest.last_cursor_ms || 0)) {
+          stopPlayback();
+        }
+      }, 1000);
+    }
+
+    document.getElementById("theme-toggle").addEventListener("click", toggleTheme);
+    document.getElementById("graph-controls").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-packet-id]");
+      if (!button) { return; }
+      const packetId = button.getAttribute("data-packet-id");
+      if (selectedIds.includes(packetId)) {
+        selectedIds = selectedIds.filter((value) => value !== packetId);
+      } else {
+        selectedIds = [...selectedIds, packetId];
+      }
+      saveSelectedIds();
+      renderAll();
+    });
+    document.getElementById("playback-toggle").addEventListener("click", () => {
+      if (isPlaying) {
+        stopPlayback();
+      } else {
+        startPlayback();
+      }
+    });
+    document.getElementById("jump-start").addEventListener("click", () => seekTo(playbackManifest.first_cursor_ms || 0));
+    document.getElementById("jump-end").addEventListener("click", () => seekTo(playbackManifest.last_cursor_ms || 0));
+    document.getElementById("playback-slider").addEventListener("input", (event) => {
+      stopPlayback();
+      seekTo((playbackManifest.first_cursor_ms || 0) + Number(event.target.value));
+    });
+
+    document.getElementById("playback-speed").value = String(playbackManifest.default_playback_speed || 1);
+    renderAll();
+  </script>
+{% endblock %}
