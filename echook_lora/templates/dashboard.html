@@ -1,17 +1,6 @@
 {% extends "base.html" %}
 
 {% block body %}
-  <section class="hero">
-    <article class="hero-copy">
-      <p class="eyebrow">Receiver-side live telemetry and recordings</p>
-      <h1>eChook LoRa Dashboard</h1>
-      <p>Live telemetry stays on the receiver Pi, recordings only start when you ask for them, and saved sessions can be reviewed later from the dashboard.</p>
-    </article>
-    <div class="hero-actions">
-      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dashboard theme">Dark mode</button>
-    </div>
-  </section>
-
   <div class="app-shell">
     <aside class="sidebar-card">
       <p class="section-tag">Navigation</p>
@@ -26,6 +15,17 @@
     </aside>
 
     <div class="content-shell">
+      <section class="hero">
+        <article class="hero-copy">
+          <p class="eyebrow">Receiver-side live telemetry and recordings</p>
+          <h1>eChook LoRa Dashboard</h1>
+          <p>Live telemetry stays on the receiver Pi, recordings only start when you ask for them, and saved sessions can be reviewed later from the dashboard.</p>
+        </article>
+        <div class="hero-actions">
+          <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dashboard theme">Dark mode</button>
+        </div>
+      </section>
+
       <div id="global-message" class="panel-card hidden"></div>
 
       <section id="tab-live" class="tab-panel">
